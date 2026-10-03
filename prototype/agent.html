@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#FFFFFF">
+  <title>MealMind · AI 点外卖</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* ===== AI 决策会话页（页面级样式） ===== */
+    .agent-head { position: sticky; top: 0; z-index: 20; background: #fff; border-bottom: 1px solid var(--c-border); }
+    .agent-head .head-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+    .cart-pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      height: 30px; padding: 0 12px 0 10px; border-radius: 999px;
+      background: #FFF3EE; color: var(--c-primary);
+      font-size: 12px; font-weight: 600;
+    }
+    .cart-pill svg { width: 16px; height: 16px; }
+    .icon-btn { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: #444; }
+    .icon-btn svg { width: 19px; height: 19px; }
+
+    .chat { display: flex; flex-direction: column; gap: 12px; padding: 14px 12px 160px; }
+
+    /* 欢迎区 */
+    .welcome { padding: 26px 4px 0; }
+    .welcome-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; }
+    .welcome-ico {
+      width: 56px; height: 56px; border-radius: 18px; background: var(--grad-ai); color: #fff;
+      display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-float);
+    }
+    .welcome h2 { font-size: 18px; font-weight: 700; }
+    .welcome .sub { font-size: 12px; color: var(--c-text-sub); }
+    .welcome-note { margin-top: 16px; text-align: center; font-size: 10.5px; color: var(--c-text-ter); }
+    .sample-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+    .sample {
+      display: flex; align-items: center; gap: 10px; text-align: left;
+      background: #fff; border-radius: 12px; padding: 12px;
+      box-shadow: var(--shadow-card); font-size: 12.5px; color: #333;
+    }
+    .sample .txt { flex: 1; }
+    .sample svg { color: var(--c-primary); flex: none; }
+    .ctx-chip {
+      display: flex; align-items: center; gap: 5px; width: fit-content;
+      margin: 0 auto 12px;
+      padding: 4px 12px; border-radius: 999px; font-size: 11.5px;
+      background: var(--c-pink-tint); color: #C2410C;
+    }
+
+    /* 对话气泡与卡片 */
+    .bubble-user {
+      align-self: flex-end; max-width: 84%;
+      padding: 10px 13px; border-radius: 14px 14px 4px 14px;
+      background: linear-gradient(135deg, #FFE9DC, #FFD9C7); color: #7A2E0E;
+      font-size: 13.5px; line-height: 1.5;
+    }
+    .ai-card { background: #fff; border-radius: 12px; padding: 12px; box-shadow: var(--shadow-card); }
+    .ai-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--c-text-sub); margin-bottom: 8px; }
+    .ai-label svg { color: var(--c-primary); }
+    .u-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .u-chip { padding: 3px 9px; border-radius: 999px; background: var(--c-pink-tint); color: #C2410C; font-size: 11.5px; }
+    .note-line { display: flex; align-items: center; gap: 5px; margin-top: 9px; font-size: 11px; color: var(--c-success); }
+    .note-line svg { flex: none; }
+
+    /* 进度步骤 */
+    .steps { display: flex; flex-direction: column; gap: 9px; }
+    .step { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--c-text-sub); }
+    .step .dot { width: 15px; height: 15px; border-radius: 50%; border: 2px solid #E7E8EB; flex: none; position: relative; }
+    .step.doing .dot { border-color: var(--c-primary); border-top-color: transparent; animation: spin .8s linear infinite; }
+    .step.done .dot { background: var(--c-success); border-color: var(--c-success); }
+    .step.done .dot::after {
+      content: ''; position: absolute; left: 4px; top: 1.5px; width: 3.5px; height: 7px;
+      border-right: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(45deg);
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 结果 */
+    .results-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 0; }
+    .results-head h3 { font-size: 13px; font-weight: 700; }
+    .refresh-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--c-primary); font-weight: 600; }
+    .rec-head { display: flex; gap: 10px; align-items: flex-start; }
+    .rec-img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; flex: none; background: #F2F3F5; }
+    .rec-title h4 { font-size: 15px; font-weight: 700; }
+    .rec-title p { margin-top: 3px; font-size: 11px; color: var(--c-text-sub); }
+    .rec-score { margin-left: auto; text-align: center; flex: none; padding-left: 8px; }
+    .rec-score b {
+      font-family: var(--font-price); font-size: 26px; font-weight: 800; line-height: 1;
+      background: var(--grad-cta); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
+    }
+    .rec-score span { display: block; margin-top: 3px; font-size: 9.5px; color: var(--c-text-ter); }
+    .rec-dims { margin-top: 11px; display: flex; flex-direction: column; gap: 6px; }
+    .dim { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--c-text-sub); }
+    .dim-k { width: 52px; flex: none; }
+    .dim-bar { flex: 1; height: 5px; border-radius: 3px; background: #F0F1F3; overflow: hidden; }
+    .dim-bar i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #FF8A00, #FF3B1F); }
+    .dim b { width: 26px; text-align: right; font-family: var(--font-price); font-weight: 600; color: #444; }
+    .rec-meta { margin-top: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; }
+    .conf { padding: 2px 7px; border-radius: 999px; font-size: 10.5px; }
+    .conf.high { background: #EAF7EE; color: #1E9E57; }
+    .conf.mid { background: #FFF6E5; color: #B7791F; }
+    .conf.low { background: #FFF1EE; color: #D93025; }
+    .rec-reason { color: #6B6F76; }
+    .rec-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .rec-actions { display: flex; align-items: center; gap: 12px; margin-top: 11px; }
+    .add-btn { min-width: 98px; height: 32px; font-size: 13px; border-radius: 999px; }
+    .add-btn.done { background: #F0F1F3; color: #9EA2A8; box-shadow: none; }
+    .rec-link { font-size: 12px; color: var(--c-text-ter); }
+
+    /* 底部输入区 */
+    .agent-inputbar {
+      position: fixed; z-index: 40;
+      left: 50%; bottom: 0; transform: translateX(-50%);
+      width: 100%; max-width: 414px;
+      padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
+      background: rgba(255, 255, 255, .98);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border-top: 1px solid var(--c-border);
+    }
+    .chips-scroll { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; }
+    .chips-scroll::-webkit-scrollbar { display: none; }
+    .input-row { display: flex; align-items: center; gap: 8px; }
+    .input-pill {
+      flex: 1; display: flex; align-items: center; height: 40px;
+      padding: 0 14px; border-radius: 999px; background: #F4F5F7;
+    }
+    .input-pill input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 13.5px; }
+    .send-btn {
+      width: 40px; height: 40px; border-radius: 50%; flex: none;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--grad-cta); color: #fff; box-shadow: 0 4px 12px rgba(255, 80, 0, .3);
+    }
+    .send-btn svg { width: 19px; height: 19px; }
+    .send-btn:disabled { opacity: .5; }
+  </style>
+</head>
+<body data-page="agent">
+<div class="app">
+
+  <div class="statusbar" aria-hidden="true">
+    <span>9:41</span>
+    <span class="statusbar-icons">
+      <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.8"/><rect x="4.5" y="5" width="3" height="6" rx="0.8"/><rect x="9" y="2.6" width="3" height="8.4" rx="0.8"/><rect x="13.5" y="0" width="3" height="11" rx="0.8"/></svg>
+      <svg width="16" height="11" viewBox="0 0 16 11" fill="currentColor"><path d="M8 10.6 6.2 8.7a2.6 2.6 0 0 1 3.6 0L8 10.6z"/><path d="M8 6.6c1.2 0 2.3.45 3.1 1.2l1.2-1.25A6.4 6.4 0 0 0 8 4.8a6.4 6.4 0 0 0-4.3 1.75L4.9 7.8A4.5 4.5 0 0 1 8 6.6z"/><path d="M8 2.8c2.1 0 4 .8 5.5 2.1l1.2-1.25A9.3 9.3 0 0 0 8 1 9.3 9.3 0 0 0 1.3 3.65L2.5 4.9A7.4 7.4 0 0 1 8 2.8z"/></svg>
+      <svg width="25" height="12" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="18" height="8" rx="1.8" fill="currentColor"/><path d="M23 4v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity="0.4"/></svg>
+    </span>
+  </div>
+
+  <main class="screen screen--flush">
+
+    <div class="page-head agent-head">
+      <a class="back" href="home.html" aria-label="返回">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+      </a>
+      <span class="title">AI 点外卖</span>
+      <span class="head-right">
+        <a class="cart-pill" data-cart-target href="cart.html" aria-label="购物车">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2.6 3h2.2l2.3 11.1a1.8 1.8 0 0 0 1.8 1.4h8.4a1.8 1.8 0 0 0 1.8-1.4L20.7 7H5.4"/></svg>
+          <span data-cart-badge hidden>0</span>
+        </a>
+        <button class="icon-btn" id="resetBtn" type="button" aria-label="重新开始">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.6-3.9"/><path d="M3.5 3.5V8H8"/><path d="M4 13a8 8 0 0 0 14.6 3.9"/><path d="M20.5 20.5V16H16"/></svg>
+        </button>
+      </span>
+    </div>
+
+    <div class="chat" id="chat"></div>
+  </main>
+
+  <div class="agent-inputbar">
+    <div class="chips-scroll" id="quickChips"></div>
+    <div class="input-row">
+      <span class="input-pill">
+        <input id="agentInput" type="text" placeholder="说说你想吃什么，比如：30 内、微辣、不要香菜" aria-label="输入你的用餐需求">
+      </span>
+      <button class="send-btn" id="sendBtn" type="button" aria-label="发送">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script src="mock.js"></script>
+<script src="state.js"></script>
+<script src="icons.js"></script>
+<script src="app.js"></script>
+<script>
+  /* ================= AI 决策会话（原型演示：canned 数据，不调用真实模型） ================= */
+  (function () {
+    var chat = document.getElementById('chat');
+    var input = document.getElementById('agentInput');
+    var sendBtn = document.getElementById('sendBtn');
+    var setOrder = ['spicy', 'light', 'night'];
+    var setCursor = 0;
+    var ctxMerchant = new URLSearchParams(location.search).get('m'); // 商家页「让 AI 帮我选这家」带入
+
+    function el(html) { var d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstChild; }
+    function scrollBottom() {
+      requestAnimationFrame(function () { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); });
+    }
+
+    function addUserBubble(text) {
+      var b = el('<div class="bubble-user"></div>');
+      b.textContent = text;
+      chat.appendChild(b);
+      scrollBottom();
+    }
+
+    function pickSet(text) {
+      if (/减脂|清淡|沙拉|轻食|健康|素|不辣/.test(text)) return 'light';
+      if (/夜宵|深夜|加班|晚上/.test(text)) return 'night';
+      return 'spicy';
+    }
+
+    function understandingCard(set) {
+      var chips = set.understand.map(function (t) { return '<span class="u-chip">' + t + '</span>'; }).join('');
+      var card = el(
+        '<div class="ai-card">' +
+          '<div class="ai-label">' + icon('sparkles', 14) + '<span>我理解到的需求</span></div>' +
+          '<div class="u-chips">' + chips + '</div>' +
+          '<div class="note-line">' + icon('circle-check', 13) + '<span>' + set.filterNote + '</span></div>' +
+        '</div>');
+      chat.appendChild(card);
+      scrollBottom();
+    }
+
+    function progressCard() {
+      var steps = window.DB.agent.steps;
+      var html = '<div class="ai-card"><div class="ai-label">' + icon('sparkles', 14) + '<span>正在为你分析</span></div><div class="steps">';
+      steps.forEach(function (s, i) {
+        html += '<div class="step" data-i="' + i + '"><span class="dot"></span><span class="txt">' + s + '</span></div>';
+      });
+      html += '</div></div>';
+      var card = el(html);
+      chat.appendChild(card);
+      scrollBottom();
+      var rows = card.querySelectorAll('.step');
+      var starts = [60, 560, 1080, 1520];
+      var ends = [480, 1020, 1440, 1860];
+      rows.forEach(function (row, i) {
+        setTimeout(function () { row.classList.add('doing'); }, starts[i]);
+        setTimeout(function () { row.classList.remove('doing'); row.classList.add('done'); scrollBottom(); }, ends[i]);
+      });
+    }
+
+    function recCard(c) {
+      var m = window.DB.getMerchant(c.merchantId);
+      var dims = c.dims.map(function (d) {
+        return '<div class="dim"><span class="dim-k">' + d[0] + '</span>' +
+          '<span class="dim-bar"><i style="width:' + (d[1] * 10) + '%"></i></span>' +
+          '<b>' + d[1].toFixed(1) + '</b></div>';
+      }).join('');
+      var confCls = c.conf === '高' ? 'high' : (c.conf === '中' ? 'mid' : 'low');
+      var tags = (c.tags || []).map(function (t) {
+        return '<i class="tag ' + (t === '依据有限' ? 'tag-orange' : 'tag-red') + '">' + t + '</i>';
+      }).join('');
+      var img = window.DB.dishImg(c.name);
+
+      var card = el(
+        '<article class="ai-card rec-card">' +
+          '<div class="rec-head">' +
+            '<img class="rec-img" src="' + img + '" alt="' + c.name + '">' +
+            '<div class="rec-title"><h4>' + c.name + '</h4>' +
+              '<p>' + m.name + ' · ' + m.mins + ' 分钟 · ' + m.km + '</p></div>' +
+            '<div class="rec-score"><b>' + c.score + '</b><span>综合分</span></div>' +
+          '</div>' +
+          '<div class="rec-dims">' + dims + '</div>' +
+          '<div class="rec-meta">' +
+            '<span class="conf ' + confCls + '">置信度 ' + c.conf + ' · ' + c.confVal + '</span>' +
+            '<span class="rec-reason">' + c.reason + '</span>' +
+          '</div>' +
+          (tags ? '<div class="rec-tags">' + tags + '</div>' : '') +
+          '<div class="rec-actions">' +
+            '<button class="btn btn-grad add-btn" type="button">加入购物车</button>' +
+            '<a class="rec-link" href="merchant.html?id=' + m.id + '">看店铺</a>' +
+          '</div>' +
+        '</article>');
+
+      var btn = card.querySelector('.add-btn');
+      btn.addEventListener('click', function () {
+        if (btn.classList.contains('done')) return;
+        window.Store.addItem({
+          dishId: c.dishId, name: c.name, spec: '标准', price: c.price, qty: 1,
+          merchantId: m.id, merchantName: m.name, img: img
+        });
+        window.flyToCart(card.querySelector('.rec-img'));
+        btn.classList.add('done');
+        btn.textContent = '已加入';
+        window.showToast('已加入购物车');
+      });
+      return card;
+    }
+
+    function resultsBlock(setKey) {
+      var set = window.DB.agent.sets[setKey];
+      var cards = set.cards;
+      var focused = false;
+      if (ctxMerchant) {
+        var picked = cards.filter(function (c) { return c.merchantId === ctxMerchant; });
+        if (picked.length) { cards = picked; focused = true; }
+      }
+      var title = focused
+        ? '本店候选 · 按综合分排序'
+        : '为你找到 ' + cards.length + ' 个候选 · 按综合分排序';
+      var head = el(
+        '<div class="results-head"><h3>' + title + '</h3>' +
+        '<button class="refresh-btn" type="button">' + icon('refresh', 13) + '<span>换一批</span></button></div>');
+      head.querySelector('.refresh-btn').addEventListener('click', refresh);
+      chat.appendChild(head);
+
+      cards.forEach(function (c, idx) {
+        var card = recCard(c);
+        card.style.animation = 'fadeUp .4s ease both';
+        card.style.animationDelay = (idx * 70) + 'ms';
+        chat.appendChild(card);
+      });
+      scrollBottom();
+    }
+
+    function runFlow(text, forcedKey) {
+      addUserBubble(text);
+      var key = forcedKey || pickSet(text);
+      setCursor = setOrder.indexOf(key);
+      var set = window.DB.agent.sets[key];
+      setTimeout(function () { understandingCard(set); }, 240);
+      setTimeout(function () {
+        progressCard();
+        setTimeout(function () { resultsBlock(key); }, 2000);
+      }, 500);
+    }
+
+    function refresh() {
+      if (setCursor < 0) setCursor = 0;
+      setCursor = (setCursor + 1) % setOrder.length;
+      var key = setOrder[setCursor];
+      var line = el('<div class="ai-card"><div class="ai-label">' + icon('refresh', 14) + '<span>已按相同需求换一批候选</span></div></div>');
+      chat.appendChild(line);
+      scrollBottom();
+      setTimeout(function () { resultsBlock(key); }, 320);
+    }
+
+    function clarify(text) {
+      addUserBubble(text);
+      var card = el(
+        '<div class="ai-card">' +
+          '<div class="ai-label">' + icon('sparkles', 14) + '<span>再确认一下</span></div>' +
+          '<p style="font-size:13px;color:#333;line-height:1.6">想吃什么方向的？我按这个方向逐项打分。</p>' +
+          '<div class="u-chips" style="margin-top:10px">' +
+            ['来点辣的', '清淡一点', '深夜加餐'].map(function (t) {
+              return '<button class="chip" type="button">' + t + '</button>';
+            }).join('') +
+          '</div>' +
+        '</div>');
+      card.querySelectorAll('.chip').forEach(function (b) {
+        b.addEventListener('click', function () { runFlow(b.textContent); });
+      });
+      chat.appendChild(card);
+      scrollBottom();
+    }
+
+    function submit(text) {
+      text = (text || '').trim();
+      if (!text) { window.showToast('先说说你想吃什么'); return; }
+      if (/随便|不知道|都行|你看着办/.test(text) && text.length <= 10) { clarify(text); return; }
+      runFlow(text);
+    }
+
+    function renderWelcome() {
+      chat.innerHTML = '';
+      var ctx = '';
+      if (ctxMerchant) {
+        var m = window.DB.getMerchant(ctxMerchant);
+        ctx = '<div class="ctx-chip">' + icon('sparkles', 13) + '<span>本店模式：' + m.name + '</span></div>';
+      }
+      var samples = window.DB.agent.samples.map(function (t) {
+        return '<button class="sample" type="button"><span class="txt">' + t + '</span>' + icon('chevron-right', 16) + '</button>';
+      }).join('');
+      var wrap = el(
+        '<div class="welcome">' + ctx +
+          '<div class="welcome-hero">' +
+            '<span class="welcome-ico">' + icon('sparkles', 26) + '</span>' +
+            '<h2>说说你想吃什么</h2>' +
+            '<p class="sub">口味、预算、忌口，说一句就行</p>' +
+          '</div>' +
+          '<div class="welcome-note">试试下面的例子，或直接输入你的需求 · AI 结果为模拟演示</div>' +
+          '<div class="sample-list">' + samples + '</div>' +
+        '</div>');
+      wrap.querySelectorAll('.sample').forEach(function (b) {
+        b.addEventListener('click', function () { submit(b.querySelector('.txt').textContent); });
+      });
+      chat.appendChild(wrap);
+    }
+
+    function renderQuickChips() {
+      var wrap = document.getElementById('quickChips');
+      wrap.innerHTML = window.DB.agent.quickChips.map(function (t) {
+        return '<button class="chip" type="button">' + t + '</button>';
+      }).join('');
+      wrap.querySelectorAll('.chip').forEach(function (b) {
+        b.addEventListener('click', function () { submit(b.textContent); });
+      });
+    }
+
+    sendBtn.addEventListener('click', function () { submit(input.value); input.value = ''; });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.isComposing) { submit(input.value); input.value = ''; }
+    });
+    document.getElementById('resetBtn').addEventListener('click', function () {
+      renderWelcome();
+      window.scrollTo({ top: 0 });
+    });
+
+    renderQuickChips();
+    renderWelcome();
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+# 环境与密钥（绝不提交）
+.env
+.env.local
+deploy/.env
+
+# Node / 前端
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Java
+target/
+*.class
+*.jar
+!**/gradle/wrapper/*.jar
+.mvn/wrapper/maven-wrapper.jar
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / 系统
+.DS_Store
+.idea/
+*.iml
+.vscode/

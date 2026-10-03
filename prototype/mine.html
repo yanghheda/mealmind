@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#FFF4EC">
+  <title>MealMind · 我的</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* ---------- 页面：我的 ---------- */
+    .mine-top {
+      background: linear-gradient(180deg, #FFF4EC 0%, #FFF9F5 58%, #FFFDFB 100%);
+      padding: 8px 16px 18px;
+    }
+    .profile { display: flex; align-items: center; gap: 12px; }
+    .avatar {
+      position: relative; flex: none;
+      width: 56px; height: 56px; border-radius: 50%;
+      background: var(--grad-ai); color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      border: 3px solid #fff; box-shadow: var(--shadow-float);
+    }
+    .avatar > svg { width: 26px; height: 26px; }
+    .avatar-spark {
+      position: absolute; right: -3px; bottom: -3px;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: #fff; color: var(--c-primary);
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 2px 6px rgba(255, 80, 0, .28);
+    }
+    .avatar-spark svg { width: 12px; height: 12px; }
+    .profile-main { min-width: 0; }
+    .profile-name { font-size: 18px; font-weight: 700; }
+    .profile-sub { margin-top: 3px; font-size: 11.5px; color: var(--c-text-sub); }
+
+    /* 卡片标题（本页复用） */
+    .card-head { display: flex; flex-direction: column; gap: 2px; }
+    .card-title { font-size: 15px; font-weight: 700; }
+    .card-sub { font-size: 11px; color: var(--c-text-ter); }
+
+    /* 偏好记忆卡 */
+    .prefs-card { margin: 0 12px; padding: 14px 14px 12px; }
+    .prefs-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .prefs-empty { font-size: 12px; color: var(--c-text-ter); }
+    .pref-chip {
+      border-color: rgba(255, 80, 0, .25);
+      background: var(--c-pink-tint); color: var(--c-primary); font-weight: 600;
+    }
+    .pref-chip:active { opacity: .65; }
+    .pref-chip svg { opacity: .7; }
+    .add-pref {
+      display: flex; align-items: center; justify-content: center; gap: 4px;
+      width: 100%; height: 34px; margin-top: 12px;
+      border: 1px dashed rgba(255, 80, 0, .35); border-radius: var(--radius-sm);
+      background: #FFF9F6; color: var(--c-primary);
+      font-size: 12.5px; font-weight: 600;
+    }
+    .add-pref svg { width: 14px; height: 14px; }
+
+    /* 弹层分组 */
+    .sheet-title { font-size: 17px; font-weight: 700; }
+    .sheet-sub { margin-top: 3px; font-size: 11px; color: var(--c-text-ter); }
+    .pref-group { margin-bottom: 16px; }
+    .pref-group-t { margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--c-text-sub); }
+
+    /* 入口卡 */
+    .entry-card { margin: 12px 12px 0; overflow: hidden; }
+    .entry-row {
+      display: flex; align-items: center; gap: 12px;
+      width: 100%; padding: 14px; text-align: left;
+    }
+    .entry-row + .entry-row { border-top: 1px solid var(--c-border); }
+    .entry-row:active { background: #FAFAFB; }
+    .entry-ico {
+      flex: none; width: 36px; height: 36px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--tint, #F4F5F7); color: var(--ink, #555);
+    }
+    .entry-ico svg { width: 19px; height: 19px; }
+    .entry-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .entry-title { font-size: 14.5px; font-weight: 600; }
+    .entry-sub { font-size: 11.5px; color: var(--c-text-ter); }
+    .entry-chev { flex: none; display: flex; color: #C4C7CC; }
+    .entry-chev svg { width: 18px; height: 18px; }
+
+    /* 退出登录 */
+    .logout-wrap { margin: 16px 12px 0; }
+  </style>
+</head>
+<body data-page="mine">
+<div class="app">
+
+  <div class="statusbar statusbar--warm" aria-hidden="true">
+    <span>9:41</span>
+    <span class="statusbar-icons">
+      <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.8"/><rect x="4.5" y="5" width="3" height="6" rx="0.8"/><rect x="9" y="2.6" width="3" height="8.4" rx="0.8"/><rect x="13.5" y="0" width="3" height="11" rx="0.8"/></svg>
+      <svg width="16" height="11" viewBox="0 0 16 11" fill="currentColor"><path d="M8 10.6 6.2 8.7a2.6 2.6 0 0 1 3.6 0L8 10.6z"/><path d="M8 6.6c1.2 0 2.3.45 3.1 1.2l1.2-1.25A6.4 6.4 0 0 0 8 4.8a6.4 6.4 0 0 0-4.3 1.75L4.9 7.8A4.5 4.5 0 0 1 8 6.6z"/><path d="M8 2.8c2.1 0 4 .8 5.5 2.1l1.2-1.25A9.3 9.3 0 0 0 8 1 9.3 9.3 0 0 0 1.3 3.65L2.5 4.9A7.4 7.4 0 0 1 8 2.8z"/></svg>
+      <svg width="25" height="12" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="18" height="8" rx="1.8" fill="currentColor"/><path d="M23 4v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity="0.4"/></svg>
+    </span>
+  </div>
+
+  <main class="screen">
+
+    <!-- ① 头部：身份 -->
+    <div class="mine-top stagger">
+      <div class="profile">
+        <span class="avatar">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7.6" r="3.6"/><path d="M5 20.2a7 7 0 0 1 14 0"/></svg>
+          <i class="avatar-spark">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l1.7 5a2 2 0 0 0 1.2 1.2l5 1.7-5 1.7a2 2 0 0 0-1.2 1.2l-1.7 5-1.7-5a2 2 0 0 0-1.2-1.2l-5-1.7 5-1.7a2 2 0 0 0 1.2-1.2l1.7-5z"/><path d="M19 2.8v3.4"/><path d="M20.7 4.5h-3.4"/></svg>
+          </i>
+        </span>
+        <div class="profile-main">
+          <div class="profile-name" id="profileName">未登录</div>
+          <div class="profile-sub" id="profileSub">未登录 · 前往封面页登录</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ② 偏好记忆卡 -->
+    <div class="card prefs-card">
+      <div class="card-head">
+        <div class="card-title">口味偏好 · 我帮你记住</div>
+        <div class="card-sub">会话开场自动带入，可随时调整</div>
+      </div>
+      <div class="prefs-chips" id="prefChips"></div>
+      <button class="add-pref" id="addPrefBtn" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.5v13"/><path d="M5.5 12h13"/></svg>
+        添加偏好
+      </button>
+    </div>
+
+    <!-- ③ 入口卡 -->
+    <div class="card entry-card">
+      <a class="entry-row" href="eval.html">
+        <span class="entry-ico" style="--tint:#FFF0EC;--ink:#FF5000">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.4 12.3 2.5 2.5 4.7-5"/></svg>
+        </span>
+        <span class="entry-main">
+          <span class="entry-title">评测看板</span>
+          <span class="entry-sub">Golden 用例 · 校准曲线 · 延迟与成本</span>
+        </span>
+        <i class="tag tag-gray">演示</i>
+        <span class="entry-chev">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9.5 6.5 5.5 5.5-5.5 5.5"/></svg>
+        </span>
+      </a>
+      <button class="entry-row js-placeholder" type="button" data-toast="MealMind · v0.1 原型 · 模拟数据">
+        <span class="entry-ico" style="--tint:#F4F5F7;--ink:#6B6F76">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l1.7 5a2 2 0 0 0 1.2 1.2l5 1.7-5 1.7a2 2 0 0 0-1.2 1.2l-1.7 5-1.7-5a2 2 0 0 0-1.2-1.2l-5-1.7 5-1.7a2 2 0 0 0 1.2-1.2l1.7-5z"/><path d="M19 2.8v3.4"/><path d="M20.7 4.5h-3.4"/></svg>
+        </span>
+        <span class="entry-main">
+          <span class="entry-title">关于 MealMind</span>
+          <span class="entry-sub">v0.1 原型 · 模拟数据</span>
+        </span>
+        <span class="entry-chev">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9.5 6.5 5.5 5.5-5.5 5.5"/></svg>
+        </span>
+      </button>
+    </div>
+
+    <!-- ④ 退出登录 -->
+    <div class="logout-wrap">
+      <button class="btn btn-outline btn-lg" id="logoutBtn" type="button">退出登录</button>
+    </div>
+
+    <p class="app-footer-note">模拟数据 · 仅用于产品演示</p>
+  </main>
+
+  <nav class="tabbar" aria-label="主导航">
+    <a class="tab" data-nav="home" href="home.html">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.2 12 3l9 7.2"/><path d="M5.2 9.6V21h13.6V9.6"/><path d="M9.8 21v-5.6h4.4V21"/></svg>
+      <span>推荐</span>
+    </a>
+    <a class="tab js-placeholder" data-toast="演示版本未开放「消息」" href="#">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4.1 16L2.2 22l5.7-2z"/></svg>
+      <span>消息</span><i class="tab-dot"></i>
+    </a>
+    <a class="tab tab-ai" data-nav="agent" href="agent.html">
+      <span class="tab-ai-btn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l1.7 5a2 2 0 0 0 1.2 1.2l5 1.7-5 1.7a2 2 0 0 0-1.2 1.2l-1.7 5-1.7-5a2 2 0 0 0-1.2-1.2l-5-1.7 5-1.7a2 2 0 0 0 1.2-1.2l1.7-5z"/><path d="M19 2.8v3.4"/><path d="M20.7 4.5h-3.4"/></svg>
+      </span>
+      <span>AI 点外卖</span>
+    </a>
+    <a class="tab" data-nav="cart" href="cart.html">
+      <span class="tab-ico">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2.6 3h2.2l2.3 11.1a1.8 1.8 0 0 0 1.8 1.4h8.4a1.8 1.8 0 0 0 1.8-1.4L20.7 7H5.4"/></svg>
+        <i class="tab-badge" data-cart-badge hidden>0</i>
+      </span>
+      <span>购物车</span>
+    </a>
+    <a class="tab" data-nav="mine" href="mine.html">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7.6" r="3.6"/><path d="M5 20.2a7 7 0 0 1 14 0"/></svg>
+      <span>我的</span>
+    </a>
+  </nav>
+
+  <!-- 偏好选择弹层 -->
+  <div class="sheet-mask" id="prefMask"></div>
+  <div class="sheet" id="prefSheet" role="dialog" aria-label="添加偏好">
+    <div class="sheet-head">
+      <div>
+        <div class="sheet-title">添加偏好</div>
+        <div class="sheet-sub">可多选，保存后会话开场自动带入</div>
+      </div>
+      <button class="sheet-close" id="prefClose" type="button" aria-label="关闭">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12"/><path d="M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="sheet-body" id="prefBody"></div>
+    <div class="sheet-foot">
+      <button class="btn btn-grad btn-lg" id="prefSave" type="button">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="mock.js"></script>
+<script src="state.js"></script>
+<script src="api.js"></script>
+<script src="icons.js"></script>
+<script src="app.js"></script>
+<script>
+  (function () {
+    function esc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+    /* ---------- ① 头部：昵称与登录时间 ---------- */
+    function fmtLogin(ts) {
+      var d = new Date(ts), n = new Date();
+      var hm = pad(d.getHours()) + ':' + pad(d.getMinutes());
+      var sameDay = d.getFullYear() === n.getFullYear() &&
+        d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+      return sameDay ? ('今天 ' + hm + ' 登录') : ((d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日 登录');
+    }
+    var session = window.Store ? Store.session : null;
+    document.getElementById('profileName').textContent = session ? session.nickname : '未登录';
+    document.getElementById('profileSub').textContent = session
+      ? (fmtLogin(session.loginAt) + ' · 登录态长期保持')
+      : '未登录 · 前往封面页登录';
+
+    /* ---------- ② 偏好记忆（localStorage: mealmind.prefs） ---------- */
+    var PREF_KEY = 'mealmind.prefs';
+    var DEFAULT_PREFS = ['微辣', '预算 ≤ ¥30', '不吃香菜', '一人食'];
+    var GROUPS = [
+      { title: '口味', opts: ['微辣', '中辣', '不辣'] },
+      { title: '预算', opts: ['≤ ¥20', '≤ ¥30', '≤ ¥50'] },
+      { title: '忌口', opts: ['不吃香菜', '不吃花生', '不要葱'] },
+      { title: '场景', opts: ['一人食', '多人分享'] }
+    ];
+
+    function readPrefs() {
+      try {
+        var raw = localStorage.getItem(PREF_KEY);
+        if (!raw) { localStorage.setItem(PREF_KEY, JSON.stringify(DEFAULT_PREFS)); return DEFAULT_PREFS.slice(); }
+        var v = JSON.parse(raw);
+        return Array.isArray(v) ? v : DEFAULT_PREFS.slice();
+      } catch (e) { return DEFAULT_PREFS.slice(); }
+    }
+    function writePrefs(list) {
+      try { localStorage.setItem(PREF_KEY, JSON.stringify(list)); } catch (e) { /* 忽略 */ }
+    }
+    /* 归一去重：忽略空白与「预算」前缀，避免与默认项重复 */
+    function norm(s) { return String(s).replace(/\s+/g, '').replace(/^预算/, ''); }
+
+    var prefs = readPrefs();
+    var chipsEl = document.getElementById('prefChips');
+
+    function renderChips() {
+      if (!prefs.length) {
+        chipsEl.innerHTML = '<span class="prefs-empty">还没有偏好，点下方添加</span>';
+        return;
+      }
+      chipsEl.innerHTML = prefs.map(function (p, i) {
+        return '<button class="chip pref-chip" type="button" data-idx="' + i + '" aria-label="删除偏好 ' + esc(p) + '">' +
+          '<span>' + esc(p) + '</span>' + icon('x', 12) + '</button>';
+      }).join('');
+    }
+
+    chipsEl.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('.pref-chip') : null;
+      if (!b) return;
+      prefs.splice(Number(b.dataset.idx), 1);
+      writePrefs(prefs);
+      renderChips();
+      showToast('已忘记这条偏好');
+    });
+
+    /* ---------- 偏好选择弹层 ---------- */
+    var mask = document.getElementById('prefMask');
+    var sheet = document.getElementById('prefSheet');
+    var body = document.getElementById('prefBody');
+
+    function renderSheet() {
+      body.innerHTML = GROUPS.map(function (g) {
+        return '<div class="pref-group"><div class="pref-group-t">' + esc(g.title) + '</div>' +
+          '<div class="opt-row">' + g.opts.map(function (o) {
+            return '<button class="opt" type="button" data-opt="' + esc(o) + '">' + esc(o) + '</button>';
+          }).join('') + '</div></div>';
+      }).join('');
+    }
+    function openSheet() { renderSheet(); mask.classList.add('show'); sheet.classList.add('show'); }
+    function closeSheet() { mask.classList.remove('show'); sheet.classList.remove('show'); }
+
+    document.getElementById('addPrefBtn').addEventListener('click', openSheet);
+    document.getElementById('prefClose').addEventListener('click', closeSheet);
+    mask.addEventListener('click', closeSheet);
+
+    body.addEventListener('click', function (e) {
+      var o = e.target.closest ? e.target.closest('.opt') : null;
+      if (o) o.classList.toggle('on');
+    });
+
+    document.getElementById('prefSave').addEventListener('click', function () {
+      var picked = [].slice.call(body.querySelectorAll('.opt.on')).map(function (o) { return o.dataset.opt; });
+      var seen = prefs.map(norm);
+      picked.forEach(function (p) {
+        if (seen.indexOf(norm(p)) === -1) { prefs.push(p); seen.push(norm(p)); }
+      });
+      writePrefs(prefs);
+      renderChips();
+      closeSheet();
+      showToast('已记住新的偏好');
+    });
+
+    /* ---------- ④ 退出登录 ---------- */
+    document.getElementById('logoutBtn').addEventListener('click', function () {
+      if (window.Store) Store.logout();
+      location.href = 'index.html';
+    });
+
+    renderChips();
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>MealMind · 评测看板</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* ---------- 页面：评测看板 ---------- */
+    .blk-title { font-size: 15px; font-weight: 700; }
+    .blk-sub { margin-top: 3px; font-size: 11px; color: var(--c-text-ter); line-height: 1.45; }
+
+    /* 说明条 */
+    .eval-note {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      margin: 10px 12px 0; padding: 10px 12px;
+    }
+    .eval-note .n-text { flex: 1; min-width: 0; font-size: 11px; color: var(--c-text-sub); line-height: 1.4; }
+
+    /* 指标网格 */
+    .metric-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 12px 12px 0; }
+    .metric-card { padding: 12px; }
+    .metric-k { font-size: 11.5px; color: var(--c-text-sub); }
+    .metric-v {
+      margin-top: 6px; font-size: 22px; font-weight: 800;
+      font-family: var(--font-price); color: var(--c-text);
+    }
+    .metric-v.warn { color: var(--c-warning); }
+    .metric-s { margin-top: 4px; font-size: 10.5px; color: var(--c-text-ter); line-height: 1.35; }
+
+    /* 校准曲线 */
+    .chart-card { margin: 12px 12px 0; padding: 14px; }
+    .calib { display: flex; align-items: flex-end; gap: 6px; margin-top: 16px; }
+    .calib-group { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .calib-bars { height: 120px; display: flex; align-items: flex-end; justify-content: center; gap: 4px; }
+    .bar { width: 9px; border-radius: 3px 3px 0 0; }
+    .bar-conf { background: #FFD9C7; }
+    .bar-act { background: linear-gradient(180deg, #FF8A00, #FF3B1F); }
+    .calib-label { font-size: 9.5px; color: var(--c-text-ter); white-space: nowrap; }
+    .chart-legend { display: flex; gap: 16px; margin-top: 12px; font-size: 11px; color: var(--c-text-sub); }
+    .chart-legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .lg { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+    .lg-conf { background: #FFD9C7; }
+    .lg-act { background: linear-gradient(180deg, #FF8A00, #FF3B1F); }
+
+    /* badcase 列表 */
+    .bc-card { margin: 12px 12px 0; padding: 14px 14px 2px; }
+    .bc-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 0; text-align: left; }
+    .bc-row + .bc-row { border-top: 1px solid var(--c-border); }
+    .bc-row:active { background: #FAFAFB; }
+    .bc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .bc-input { width: 100%; font-size: 13px; color: var(--c-text); }
+    .bc-meta { display: flex; align-items: center; gap: 8px; }
+    .bc-time { font-size: 10.5px; color: var(--c-text-ter); }
+    .bc-chev { flex: none; display: flex; color: #C4C7CC; }
+    .bc-chev svg { width: 18px; height: 18px; }
+
+    .foot-line {
+      margin-top: -6px; padding: 0 16px calc(16px + env(safe-area-inset-bottom));
+      text-align: center; font-size: 10.5px; color: #B0B4BA;
+    }
+  </style>
+</head>
+<body data-page="mine">
+<div class="app">
+
+  <div class="statusbar" aria-hidden="true">
+    <span>9:41</span>
+    <span class="statusbar-icons">
+      <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.8"/><rect x="4.5" y="5" width="3" height="6" rx="0.8"/><rect x="9" y="2.6" width="3" height="8.4" rx="0.8"/><rect x="13.5" y="0" width="3" height="11" rx="0.8"/></svg>
+      <svg width="16" height="11" viewBox="0 0 16 11" fill="currentColor"><path d="M8 10.6 6.2 8.7a2.6 2.6 0 0 1 3.6 0L8 10.6z"/><path d="M8 6.6c1.2 0 2.3.45 3.1 1.2l1.2-1.25A6.4 6.4 0 0 0 8 4.8a6.4 6.4 0 0 0-4.3 1.75L4.9 7.8A4.5 4.5 0 0 1 8 6.6z"/><path d="M8 2.8c2.1 0 4 .8 5.5 2.1l1.2-1.25A9.3 9.3 0 0 0 8 1 9.3 9.3 0 0 0 1.3 3.65L2.5 4.9A7.4 7.4 0 0 1 8 2.8z"/></svg>
+      <svg width="25" height="12" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="18" height="8" rx="1.8" fill="currentColor"/><path d="M23 4v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity="0.4"/></svg>
+    </span>
+  </div>
+
+  <main class="screen">
+
+    <!-- ① 页头 -->
+    <div class="page-head">
+      <a class="back" href="mine.html" aria-label="返回">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+      </a>
+      <span class="title">评测看板</span>
+      <div class="head-actions">
+        <button id="refreshBtn" type="button" aria-label="刷新">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.6-3.9"/><path d="M3.5 3.5V8H8"/><path d="M4 13a8 8 0 0 0 14.6 3.9"/><path d="M20.5 20.5V16H16"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- ② 说明条 -->
+    <div class="card eval-note">
+      <span class="n-text" id="evalScope"></span>
+      <span class="n-text" id="evalUpdated" style="flex:none"></span>
+      <i class="tag tag-gray">模拟数据</i>
+    </div>
+
+    <!-- ③ 指标网格 -->
+    <div class="metric-grid" id="metricGrid"></div>
+
+    <!-- ④ 校准曲线 -->
+    <div class="card chart-card">
+      <div class="blk-title">置信度校准</div>
+      <div class="blk-sub">柱高 = 百分比，对比「模型置信度」与「实际采纳率」</div>
+      <div class="calib" id="calibChart"></div>
+      <div class="chart-legend">
+        <span><i class="lg lg-conf"></i>模型置信度</span>
+        <span><i class="lg lg-act"></i>实际采纳率</span>
+      </div>
+    </div>
+
+    <!-- ⑤ 最近 badcase -->
+    <div class="card bc-card">
+      <div class="blk-title">最近 badcase</div>
+      <div id="bcList"></div>
+    </div>
+
+    <p class="app-footer-note">模拟数据 · 仅用于产品演示</p>
+    <p class="foot-line">数据口径：rubric 版本 · 样本量 · 评测批次</p>
+  </main>
+
+  <nav class="tabbar" aria-label="主导航">
+    <a class="tab" data-nav="home" href="home.html">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.2 12 3l9 7.2"/><path d="M5.2 9.6V21h13.6V9.6"/><path d="M9.8 21v-5.6h4.4V21"/></svg>
+      <span>推荐</span>
+    </a>
+    <a class="tab js-placeholder" data-toast="演示版本未开放「消息」" href="#">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4.1 16L2.2 22l5.7-2z"/></svg>
+      <span>消息</span><i class="tab-dot"></i>
+    </a>
+    <a class="tab tab-ai" data-nav="agent" href="agent.html">
+      <span class="tab-ai-btn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l1.7 5a2 2 0 0 0 1.2 1.2l5 1.7-5 1.7a2 2 0 0 0-1.2 1.2l-1.7 5-1.7-5a2 2 0 0 0-1.2-1.2l-5-1.7 5-1.7a2 2 0 0 0 1.2-1.2l1.7-5z"/><path d="M19 2.8v3.4"/><path d="M20.7 4.5h-3.4"/></svg>
+      </span>
+      <span>AI 点外卖</span>
+    </a>
+    <a class="tab" data-nav="cart" href="cart.html">
+      <span class="tab-ico">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2.6 3h2.2l2.3 11.1a1.8 1.8 0 0 0 1.8 1.4h8.4a1.8 1.8 0 0 0 1.8-1.4L20.7 7H5.4"/></svg>
+        <i class="tab-badge" data-cart-badge hidden>0</i>
+      </span>
+      <span>购物车</span>
+    </a>
+    <a class="tab" data-nav="mine" href="mine.html">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7.6" r="3.6"/><path d="M5 20.2a7 7 0 0 1 14 0"/></svg>
+      <span>我的</span>
+    </a>
+  </nav>
+</div>
+
+<script src="mock.js"></script>
+<script src="state.js"></script>
+<script src="api.js"></script>
+<script src="icons.js"></script>
+<script src="app.js"></script>
+<script>
+  (function () {
+    var E = window.DB.eval;
+
+    function esc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    /* ---------- ② 说明条 ---------- */
+    document.getElementById('evalScope').textContent = E.scope;
+    document.getElementById('evalUpdated').textContent = '更新于 ' + E.updatedAt;
+
+    /* ---------- ③ 指标网格 ---------- */
+    var metricGrid = document.getElementById('metricGrid');
+    function renderMetrics() {
+      metricGrid.innerHTML = E.metrics.map(function (m) {
+        return '<div class="card metric-card">' +
+          '<div class="metric-k">' + esc(m.k) + '</div>' +
+          '<div class="metric-v' + (m.warn ? ' warn' : '') + '">' + esc(m.v) + '</div>' +
+          '<div class="metric-s">' + esc(m.s) + '</div>' +
+          '</div>';
+      }).join('');
+    }
+
+    /* ---------- ④ 校准曲线（绘图区固定 120px，柱高 = 百分比 × 120） ---------- */
+    var PLOT_H = 120;
+    var calibChart = document.getElementById('calibChart');
+    function renderChart() {
+      calibChart.innerHTML = E.calibration.map(function (c) {
+        var hConf = Math.round(c.conf / 100 * PLOT_H);
+        var hAct = Math.round(c.actual / 100 * PLOT_H);
+        return '<div class="calib-group">' +
+          '<div class="calib-bars">' +
+            '<span class="bar bar-conf" style="height:' + hConf + 'px"></span>' +
+            '<span class="bar bar-act" style="height:' + hAct + 'px"></span>' +
+          '</div>' +
+          '<div class="calib-label">' + esc(c.bucket) + '</div>' +
+          '</div>';
+      }).join('');
+    }
+
+    /* ---------- ⑤ 最近 badcase ---------- */
+    var bcList = document.getElementById('bcList');
+    function renderBadcases() {
+      bcList.innerHTML = E.badcases.map(function (b) {
+        var stateTag = b.state === '已修复' ? 'tag-green' : 'tag-orange';
+        return '<button class="bc-row js-placeholder" type="button" data-toast="演示数据，暂不提供详情">' +
+          '<span class="bc-main">' +
+            '<span class="bc-input ellipsis">' + esc(b.input) + '</span>' +
+            '<span class="bc-meta">' +
+              '<i class="tag tag-gray">' + esc(b.type) + '</i>' +
+              '<span class="bc-time">' + esc(b.time) + '</span>' +
+            '</span>' +
+          '</span>' +
+          '<i class="tag ' + stateTag + '">' + esc(b.state) + '</i>' +
+          '<span class="bc-chev">' + icon('chevron-right', 18) + '</span>' +
+          '</button>';
+      }).join('');
+    }
+
+    /* ---------- ① 刷新 ---------- */
+    function renderAll() { renderMetrics(); renderChart(); renderBadcases(); }
+    document.getElementById('refreshBtn').addEventListener('click', function () {
+      renderAll();
+      showToast('已刷新');
+    });
+
+    renderAll();
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#FFF4EC">
+  <title>MealMind · AI 外卖决策</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="welcome">
+<div class="app app--cover">
+
+  <div class="statusbar statusbar--warm" aria-hidden="true">
+    <span>9:41</span>
+    <span class="statusbar-icons">
+      <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.8"/><rect x="4.5" y="5" width="3" height="6" rx="0.8"/><rect x="9" y="2.6" width="3" height="8.4" rx="0.8"/><rect x="13.5" y="0" width="3" height="11" rx="0.8"/></svg>
+      <svg width="16" height="11" viewBox="0 0 16 11" fill="currentColor"><path d="M8 10.6 6.2 8.7a2.6 2.6 0 0 1 3.6 0L8 10.6z"/><path d="M8 6.6c1.2 0 2.3.45 3.1 1.2l1.2-1.25A6.4 6.4 0 0 0 8 4.8a6.4 6.4 0 0 0-4.3 1.75L4.9 7.8A4.5 4.5 0 0 1 8 6.6z"/><path d="M8 2.8c2.1 0 4 .8 5.5 2.1l1.2-1.25A9.3 9.3 0 0 0 8 1 9.3 9.3 0 0 0 1.3 3.65L2.5 4.9A7.4 7.4 0 0 1 8 2.8z"/></svg>
+      <svg width="25" height="12" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="18" height="8" rx="1.8" fill="currentColor"/><path d="M23 4v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity="0.4"/></svg>
+    </span>
+  </div>
+
+  <main class="screen screen--flush">
+    <div class="cover">
+
+      <div class="cover-hero stagger">
+        <div class="brand-mark">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l1.7 5a2 2 0 0 0 1.2 1.2l5 1.7-5 1.7a2 2 0 0 0-1.2 1.2l-1.7 5-1.7-5a2 2 0 0 0-1.2-1.2l-5-1.7 5-1.7a2 2 0 0 0 1.2-1.2l1.7-5z"/><path d="M19 2.8v3.4"/><path d="M20.7 4.5h-3.4"/></svg>
+        </div>
+        <h1 class="brand-name">MealMind</h1>
+        <p class="brand-slogan">会打分的点餐搭子</p>
+      </div>
+
+      <div class="cover-feats stagger">
+        <div class="feat">
+          <span class="feat-ico" style="--tint:#FFEAE0;--ink:#FF5000">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4.1 16L2.2 22l5.7-2z"/></svg>
+          </span>
+          <span>
+            <h4>一句话说需求</h4>
+            <p>不知道吃什么？说出口味、预算和忌口就行</p>
+          </span>
+        </div>
+        <div class="feat">
+          <span class="feat-ico" style="--tint:#FFF0F3;--ink:#F0436E">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l1.7 5a2 2 0 0 0 1.2 1.2l5 1.7-5 1.7a2 2 0 0 0-1.2 1.2l-1.7 5-1.7-5a2 2 0 0 0-1.2-1.2l-5-1.7 5-1.7a2 2 0 0 0 1.2-1.2l1.7-5z"/><path d="M19 2.8v3.4"/><path d="M20.7 4.5h-3.4"/></svg>
+          </span>
+          <span>
+            <h4>每道菜逐项打分</h4>
+            <p>口味、预算、时效、口碑，每一项都有依据</p>
+          </span>
+        </div>
+        <div class="feat">
+          <span class="feat-ico" style="--tint:#EAF7EE;--ink:#1E9E57">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2.6 3h2.2l2.3 11.1a1.8 1.8 0 0 0 1.8 1.4h8.4a1.8 1.8 0 0 0 1.8-1.4L20.7 7H5.4"/></svg>
+          </span>
+          <span>
+            <h4>选好直接加购</h4>
+            <p>演示链路到加购为止，不做结算</p>
+          </span>
+        </div>
+      </div>
+
+      <div class="cover-cta stagger">
+        <button class="btn btn-grad btn-lg" id="loginBtn" type="button">游客登录，立即体验</button>
+        <p class="cover-note">无需注册 · 登录状态长期保持，可随时退出</p>
+      </div>
+
+    </div>
+  </main>
+
+  <footer class="cover-foot">模拟数据 · 仅用于产品演示</footer>
+</div>
+
+<script src="mock.js"></script>
+<script src="state.js"></script>
+<script src="app.js"></script>
+<script>
+  // 已登录直达首页（URL 加 ?preview 可停留在封面查看）
+  if (Store.session && !/[?&]preview/.test(location.search)) {
+    location.replace('home.html');
+  }
+
+  var btn = document.getElementById('loginBtn');
+  btn.addEventListener('click', function () {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '正在进入…';
+    setTimeout(function () {
+      Store.login();
+      location.href = 'home.html';
+    }, 480);
+  });
+</script>
+</body>
+</html>

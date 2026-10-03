@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#FFF4EC">
+  <title>MealMind · 首页</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="home">
+<div class="app">
+
+  <div class="statusbar statusbar--warm" aria-hidden="true">
+    <span>9:41</span>
+    <span class="statusbar-icons">
+      <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.8"/><rect x="4.5" y="5" width="3" height="6" rx="0.8"/><rect x="9" y="2.6" width="3" height="8.4" rx="0.8"/><rect x="13.5" y="0" width="3" height="11" rx="0.8"/></svg>
+      <svg width="16" height="11" viewBox="0 0 16 11" fill="currentColor"><path d="M8 10.6 6.2 8.7a2.6 2.6 0 0 1 3.6 0L8 10.6z"/><path d="M8 6.6c1.2 0 2.3.45 3.1 1.2l1.2-1.25A6.4 6.4 0 0 0 8 4.8a6.4 6.4 0 0 0-4.3 1.75L4.9 7.8A4.5 4.5 0 0 1 8 6.6z"/><path d="M8 2.8c2.1 0 4 .8 5.5 2.1l1.2-1.25A9.3 9.3 0 0 0 8 1 9.3 9.3 0 0 0 1.3 3.65L2.5 4.9A7.4 7.4 0 0 1 8 2.8z"/></svg>
+      <svg width="25" height="12" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="18" height="8" rx="1.8" fill="currentColor"/><path d="M23 4v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity="0.4"/></svg>
+    </span>
+  </div>
+
+  <main class="screen">
+
+    <div class="home-top">
+      <div class="hero stagger">
+        <div class="hero-loc">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10.4c0 5.4-8 10.6-8 10.6s-8-5.2-8-10.6a8 8 0 0 1 16 0z"/><circle cx="12" cy="10.2" r="2.6"/></svg>
+          <span id="locName">星海中心 · B 座</span>
+          <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6.5 9.5 5.5 5.5 5.5-5.5"/></svg>
+        </div>
+        <div class="hero-search searchbar">
+          <span class="scan">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5V5.4A2.4 2.4 0 0 1 5.4 3h2.1"/><path d="M16.5 3h2.1A2.4 2.4 0 0 1 21 5.4v2.1"/><path d="M21 16.5v2.1a2.4 2.4 0 0 1-2.4 2.4h-2.1"/><path d="M7.5 21H5.4A2.4 2.4 0 0 1 3 18.6v-2.1"/><path d="M7 12h10"/></svg>
+          </span>
+          <input id="searchInput" type="text" placeholder="大家都在搜：麻辣烫" aria-label="搜索商家、菜品">
+          <button class="btn-search js-placeholder" data-toast="演示版本暂未开放搜索功能" type="button">搜索</button>
+        </div>
+      </div>
+
+      <div class="cat-grid stagger" id="catGrid"></div>
+    </div>
+
+    <div class="promo-strip">
+      <span class="promo-cell">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6"/><circle cx="9.6" cy="9.6" r="1.2"/><circle cx="14.4" cy="14.4" r="1.2"/></svg>
+        满 78 减 25
+      </span>
+      <span class="promo-cell">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 2.5v6a2 2 0 0 0 4 0v-6"/><path d="M8.5 2.5v19"/><path d="M17.5 2.5c-1.7 2.2-2.5 4.7-2.5 7.3 0 1.8.8 3.4 2.5 4.4v7.3"/></svg>
+        堂食店
+      </span>
+      <span class="promo-cell">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2.5 4.5 13.5H11L10 21.5 18.5 10.5H12l1-8z"/></svg>
+        15 分钟
+      </span>
+      <span class="promo-cell">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.6" cy="17.6" r="3.4"/><circle cx="18.4" cy="17.6" r="3.4"/><path d="M15 6.2h3l2 5.4"/><path d="M6 17.6 9.4 7h3.2l4.4 10.6"/><path d="M12.6 7l-.5-2h-2"/></svg>
+        免配送费
+      </span>
+    </div>
+
+    <div class="chips-row hscroll">
+      <button class="chip on" type="button">全部</button>
+      <button class="chip js-placeholder" data-toast="演示版本仅开放「美食外卖」" type="button">预订早餐</button>
+      <button class="chip js-placeholder" data-toast="演示版本仅开放「美食外卖」" type="button">龙虾烧烤</button>
+      <button class="chip js-placeholder" data-toast="演示版本仅开放「美食外卖」" type="button">超市便利</button>
+      <button class="chip js-placeholder" data-toast="演示版本仅开放「美食外卖」" type="button">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 6.5h-6"/><path d="M9.5 6.5h-6"/><path d="M20.5 12h-9"/><path d="M7 12H3.5"/><path d="M20.5 17.5h-3.5"/><path d="M12.5 17.5h-9"/><circle cx="12" cy="6.5" r="2"/><circle cx="9.5" cy="12" r="2"/><circle cx="14.5" cy="17.5" r="2"/></svg>
+        筛选
+      </button>
+    </div>
+
+    <div class="sec-head">
+      <h2 class="sec-title">为你推荐</h2>
+      <a class="sec-more" href="foods.html">
+        更多外卖
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9.5 6.5 5.5 5.5-5.5 5.5"/></svg>
+      </a>
+    </div>
+
+    <div id="merchantList"></div>
+
+    <p class="app-footer-note">模拟数据 · 仅用于产品演示</p>
+  </main>
+
+  <nav class="tabbar" aria-label="主导航">
+    <a class="tab" data-nav="home" href="home.html">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.2 12 3l9 7.2"/><path d="M5.2 9.6V21h13.6V9.6"/><path d="M9.8 21v-5.6h4.4V21"/></svg>
+      <span>推荐</span>
+    </a>
+    <a class="tab js-placeholder" data-toast="演示版本未开放「消息」" href="#">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4.1 16L2.2 22l5.7-2z"/></svg>
+      <span>消息</span><i class="tab-dot"></i>
+    </a>
+    <a class="tab tab-ai" data-nav="agent" href="agent.html">
+      <span class="tab-ai-btn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l1.7 5a2 2 0 0 0 1.2 1.2l5 1.7-5 1.7a2 2 0 0 0-1.2 1.2l-1.7 5-1.7-5a2 2 0 0 0-1.2-1.2l-5-1.7 5-1.7a2 2 0 0 0 1.2-1.2l1.7-5z"/><path d="M19 2.8v3.4"/><path d="M20.7 4.5h-3.4"/></svg>
+      </span>
+      <span>AI 点外卖</span>
+    </a>
+    <a class="tab" data-nav="cart" href="cart.html">
+      <span class="tab-ico">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2.6 3h2.2l2.3 11.1a1.8 1.8 0 0 0 1.8 1.4h8.4a1.8 1.8 0 0 0 1.8-1.4L20.7 7H5.4"/></svg>
+        <i class="tab-badge" data-cart-badge hidden>0</i>
+      </span>
+      <span>购物车</span>
+    </a>
+    <a class="tab" data-nav="mine" href="mine.html">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7.6" r="3.6"/><path d="M5 20.2a7 7 0 0 1 14 0"/></svg>
+      <span>我的</span>
+    </a>
+  </nav>
+</div>
+
+<script src="mock.js"></script>
+<script src="state.js"></script>
+<script src="api.js"></script>
+<script src="icons.js"></script>
+<script src="app.js"></script>
+<script>
+  /* ---------- 分类宫格：仅「美食外卖」可点，其余统一轻提示 ---------- */
+  (function () {
+    var grid = document.getElementById('catGrid');
+    var html = '';
+    window.DB.categories.forEach(function (c) {
+      var inner = '<span class="cat-tile" style="--tint:' + c.tint + ';--ink:' + c.ink + '">' +
+        icon(c.icon, 23) + '</span><span>' + c.name + '</span>';
+      if (c.real) {
+        html += '<a class="cat" href="foods.html">' + inner + '</a>';
+      } else {
+        html += '<button class="cat js-placeholder" type="button" data-toast="演示版本仅开放「美食外卖」">' + inner + '</button>';
+      }
+    });
+    grid.innerHTML = html;
+  })();
+
+  /* ---------- 推荐商家：先骨架屏，再渲染（展示加载状态） ---------- */
+  (function () {
+    var list = document.getElementById('merchantList');
+
+    function renderSkeleton() {
+      var html = '';
+      for (var i = 0; i < 3; i++) {
+        html += '<div class="sk-card"><div class="sk sk-img"></div><div class="sk-lines">' +
+          '<div class="sk sk-line w60"></div><div class="sk sk-line w40"></div><div class="sk sk-line w80"></div>' +
+          '</div></div>';
+      }
+      list.innerHTML = html;
+    }
+
+    function renderCard(m) {
+      var promo = m.promoTags.slice(0, 2).map(function (t) { return '<i class="tag tag-red">' + t + '</i>'; }).join('');
+      var feast = m.feastTags.slice(0, 2).map(function (t) { return '<i class="tag tag-gray">' + t + '</i>'; }).join('');
+      return '<a class="mcard" href="merchant.html?id=' + m.id + '">' +
+        '<span class="mcard-imgwrap">' +
+          '<img class="mcard-img" src="' + m.img + '" alt="' + m.name + '">' +
+          (m.badge ? '<i class="mcard-badge">' + m.badge + '</i>' : '') +
+        '</span>' +
+        '<span class="mcard-main">' +
+          '<span class="mcard-name">' + m.name + '</span>' +
+          '<span class="mcard-meta"><b class="rate">' + m.rating + '</b><span class="dot">·</span>' +
+            '<span>' + m.sales + '</span><span class="dot">·</span>' +
+            '<span>' + m.mins + ' 分钟</span><span class="dot">·</span><span>' + m.km + '</span></span>' +
+          '<span class="mcard-tags">' + promo + feast + '</span>' +
+        '</span></a>';
+    }
+
+    renderSkeleton();
+    API.fetchHomeMerchants().then(function (res) {
+      list.innerHTML = res.data.map(renderCard).join('');
+    });
+  })();
+</script>
+</body>
+</html>
