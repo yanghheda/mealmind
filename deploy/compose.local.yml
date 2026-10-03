@@ -1,0 +1,22 @@
+# 本地开发叠加文件：让 compose 用本地源码构建镜像，而不是拉取 GHCR。
+# 生产不使用本文件；服务器上源码不落地，只 pull 镜像。
+#
+# 用法（在仓库根目录执行）：
+#   docker network create infra-net   # 仅首次，模拟服务器上的共享网络
+#   cp deploy/.env.example deploy/.env
+#   docker compose --env-file deploy/.env -f deploy/compose.yml -f deploy/compose.local.yml up -d --build --wait
+services:
+  mealmind-web:
+    image: mealmind-web:local
+    build:
+      context: ../apps/h5
+
+  mealmind-api:
+    image: mealmind-api:local
+    build:
+      context: ../services/biz
+
+  mealmind-agent:
+    image: mealmind-agent:local
+    build:
+      context: ../services/agent

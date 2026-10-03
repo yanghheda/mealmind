@@ -1,0 +1,81 @@
+# MealMind 项目 compose —— 只编排三个应用容器，不含任何存储。
+#
+# 服务器上的共享基础设施（边缘 nginx / MySQL / Redis）由 /opt/infra 提供，
+# 本项目不部署、不重启、不升级它；两者通过外部网络 infra-net 互通。
+# 公网唯一入口是基础设施的边缘 nginx，本项目不映射任何宿主机端口。
+#
+# 生产：镜像由 CI 构建并推送 GHCR，服务器只 pull + up。
+#   1. 复制 .env.example 为 .env 并填值（不提交仓库）
+#   2. docker compose --env-file deploy/.env -f deploy/compose.yml up -d --wait
+#
+# 本地：先创建同名外部网络，再叠加 compose.local.yml 用本地源码构建镜像。
+#   1. docker network create infra-net   # 仅首次
+#   2. cp deploy/.env.example deploy/.env
+#   3. docker compose --env-file deploy/.env -f deploy/compose.yml -f deploy/compose.local.yml up -d --build --wait
+name: mealmind
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # 静态资源容器（nginx:alpine），只接 infra-net，被边缘 nginx 反代。
+  mealmind-web:
+    image: ${MEALMIND_IMAGE_PREFIX:-ghcr.io/owner/mealmind}-web:${MEALMIND_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/index.html"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks: [infra-net]
+
+  # 业务服务（Spring Boot :8080）：连共享 MySQL / Redis，对内调 Agent，对外提供 REST 与 SSE。
+  mealmind-api:
+    image: ${MEALMIND_IMAGE_PREFIX:-ghcr.io/owner/mealmind}-api:${MEALMIND_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      MYSQL_URL: jdbc:mysql://mysql:3306/mealmind
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      AGENT_BASE_URL: http://mealmind-agent:8000
+      INTERNAL_TOKEN: ${MEALMIND_INTERNAL_TOKEN}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/actuator/health/readiness"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      mealmind-agent: { condition: service_healthy }
+    networks: [infra-net, internal]
+
+  # Agent 运行时（FastAPI :8000）：仅项目内网，不接任何存储、不暴露端口；
+  # 模型密钥只存在于该容器环境变量。
+  mealmind-agent:
+    image: ${MEALMIND_IMAGE_PREFIX:-ghcr.io/owner/mealmind}-agent:${MEALMIND_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      INTERNAL_TOKEN: ${MEALMIND_INTERNAL_TOKEN}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u, sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [internal]
+
+networks:
+  infra-net: { external: true }
+  internal: { internal: true }
