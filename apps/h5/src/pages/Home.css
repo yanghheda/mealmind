@@ -1,0 +1,34 @@
+/* 首页专属样式（仅使用设计契约 token） */
+
+/* 排名文案：原型首页卡片未展示 rankLabel，M1 任务要求展示，用 warning 色小字补充 */
+.mcard-rank {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--c-warning);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 休息中商家：图片去色、内容降透明度，仍可进入详情（只读） */
+.mcard--closed .mcard-img {
+  filter: grayscale(1);
+  opacity: .6;
+}
+.mcard--closed .mcard-name,
+.mcard--closed .mcard-meta,
+.mcard--closed .mcard-rank,
+.mcard--closed .mcard-tags,
+.mcard--closed .disc-strip {
+  opacity: .6;
+}
+.mcard--closed .mcard-badge {
+  background: var(--c-text-ter);
+}
+
+/* 加载更多 */
+.load-more {
+  display: flex;
+  justify-content: center;
+  padding: 4px 12px 8px;
+}

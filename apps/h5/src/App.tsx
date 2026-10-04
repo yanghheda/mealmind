@@ -1,9 +1,45 @@
+import { Navigate, Route, Routes } from 'react-router-dom'
+import { ToastHost } from './components/ToastHost'
+import { RequireSession } from './components/RequireSession'
+import { Welcome } from './pages/Welcome'
+import { Home } from './pages/Home'
+import { Merchant } from './pages/Merchant'
+import { Cart } from './pages/Cart'
+
+/** 路由表：封面 / 首页 / 商家详情 / 购物车；其余路径回封面。 */
 function App() {
   return (
-    <main className="app">
-      <h1>MealMind</h1>
-      <p className="marker">build: {__BUILD_TIME__}</p>
-    </main>
+    <>
+      <Routes>
+        <Route path="/" element={<Welcome />} />
+        <Route
+          path="/home"
+          element={
+            <RequireSession>
+              <Home />
+            </RequireSession>
+          }
+        />
+        <Route
+          path="/merchant/:id"
+          element={
+            <RequireSession>
+              <Merchant />
+            </RequireSession>
+          }
+        />
+        <Route
+          path="/cart"
+          element={
+            <RequireSession>
+              <Cart />
+            </RequireSession>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      <ToastHost />
+    </>
   )
 }
 

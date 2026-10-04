@@ -1,0 +1,59 @@
+/* ---------- 购物车页专属（自 prototype/cart.html 移植，仅使用契约 token 与既有类） ---------- */
+.cart-screen { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
+
+.cart-loc { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--c-text-sub); }
+.cart-loc svg { width: 13px; height: 13px; }
+.cart-loc .chev { width: 12px; height: 12px; }
+.cart-manage { font-size: 13px; color: var(--c-text); }
+
+/* 勾选圈：默认勾选、可单条取消 / 全选 */
+.pick { flex: none; display: flex; align-items: center; justify-content: center; color: var(--c-text-ter); }
+.pick.on { color: var(--c-primary); }
+
+.cart-list { display: flex; flex-direction: column; gap: 10px; padding: 12px 12px 0; }
+
+.cart-ghead { display: flex; align-items: center; gap: 8px; padding: 12px 12px 6px; }
+.cart-gname { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; font-size: 14px; font-weight: 600; }
+.cart-gname svg { flex: none; width: 13px; height: 13px; color: var(--c-text-ter); }
+.cart-gtext { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cart-gsubtotal { flex: none; font-size: 12px; color: var(--c-text-ter); font-family: var(--font-price); }
+.cart-gdel { flex: none; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; color: var(--c-text-ter); }
+.cart-gdel svg { width: 16px; height: 16px; }
+
+.cart-gitems { padding: 0 12px; }
+.cart-item { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-top: 1px solid var(--c-border); }
+.cart-item:first-child { border-top: 0; }
+.cart-thumb { flex: none; width: 72px; height: 72px; border-radius: 10px; object-fit: cover; background: #F2F3F5; }
+.cart-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cart-iname { font-size: 14px; font-weight: 600; line-height: 1.3; }
+.cart-iunavailable { margin-left: 6px; vertical-align: middle; }
+.cart-ispec { font-size: 11px; color: var(--c-text-ter); }
+.cart-ibottom { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+.cart-iprice { font-size: 15px; }
+.cart-idel { flex: none; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; color: var(--c-text-ter); }
+.cart-idel svg { width: 18px; height: 18px; }
+
+/* 已下架条目不可再增减 */
+.stepper button[disabled] { opacity: .4; cursor: not-allowed; }
+
+.empty-title { font-size: 15px; font-weight: 600; color: var(--c-text); }
+.empty-acts { display: flex; gap: 10px; }
+
+/* 底部固定结算栏：位于 Tab 之上 */
+/* 页面作用域：Merchant.css 里也有 .cartbar，不限定会互相覆盖 */
+.app--cart .cartbar {
+  position: fixed; z-index: 60;
+  left: 50%; bottom: calc(56px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: 100%; max-width: 414px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, .98);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--c-border);
+}
+.cartbar-sum { display: inline-flex; align-items: baseline; gap: 4px; margin-right: auto; }
+.cartbar-all { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--c-text-sub); }
+.cartbar-slabel { font-size: 12px; color: var(--c-text-sub); }
+.cartbar-total { font-size: 18px; }
+.cartbar-cta { height: 44px; padding: 0 22px; font-size: 15px; }
