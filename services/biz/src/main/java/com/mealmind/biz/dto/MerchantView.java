@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
  * 商家视图，接口 4/5/6 共用（对齐技术方案 §4.2 接口 5 的 Merchant 契约）。
+ * 相对该契约增补 notice：PRD 4.5 要求商家详情头部展示公告，实体已有该列。
  */
 public record MerchantView(
         String id,
@@ -20,6 +21,7 @@ public record MerchantView(
         BigDecimal deliveryFee,
         @JsonProperty("isOpen") boolean isOpen,
         String rankLabel,
+        String notice,
         List<String> promoTags,
         List<String> featureTags,
         List<PreviewDish> previewDishes) {

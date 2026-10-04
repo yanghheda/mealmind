@@ -219,6 +219,7 @@ public class MerchantService {
                     merchant.getDeliveryFee(),
                     merchant.getIsOpen() == null || merchant.getIsOpen() != 0,
                     merchant.getRankLabel(),
+                    merchant.getNotice(),
                     promoTags,
                     featureTags,
                     previews));
