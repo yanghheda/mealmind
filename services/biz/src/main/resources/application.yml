@@ -1,6 +1,45 @@
 server:
   port: 8080
 
+spring:
+  application:
+    name: mealmind-api
+  datasource:
+    # 连接串与账号由容器环境变量注入（见 deploy/compose.yml）
+    url: ${MYSQL_URL:jdbc:mysql://mysql:3306/mealmind}
+    username: ${MYSQL_USER:mealmind}
+    password: ${MYSQL_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      connection-timeout: 3000
+      maximum-pool-size: 10
+      minimum-idle: 2
+      # URL 未显式声明的连接参数在此兜底（URL 中同名参数优先）
+      data-source-properties:
+        useSSL: false
+        allowPublicKeyRetrieval: true
+        serverTimezone: Asia/Shanghai
+        characterEncoding: UTF-8
+        connectTimeout: "3000"
+        socketTimeout: "10000"
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379/0}
+      timeout: 2s
+      connect-timeout: 2s
+  jackson:
+    time-zone: Asia/Shanghai
+    default-property-inclusion: always
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: input
+
 management:
   endpoints:
     web:
@@ -11,3 +50,50 @@ management:
       show-details: never
       probes:
         enabled: true
+
+# 业务配置（AppProperties 绑定）
+mealmind:
+  # 业务服务访问 Agent 运行时的内部地址（M1 暂未使用，占位以对齐 compose 环境变量）
+  agent-base-url: "${AGENT_BASE_URL:http://localhost:8000}"
+  internal-token: "${INTERNAL_TOKEN:}"
+  # Redis 键统一前缀
+  redis-prefix: "mealmind:"
+  # 图片资源基地址；留空则输出相对路径 /images/xxx
+  image-base-url: "${IMAGE_BASE_URL:}"
+  # 游客昵称前缀
+  nickname-prefix: "干饭人_"
+  # 分页默认值与上限
+  page-size-default: 10
+  page-size-max: 50
+  # 商家列表 / 菜单缓存 TTL（秒）
+  cache-ttl-seconds: 300
+  # 品类 -> 图片文件名映射，与 apps/h5/public/images/manifest.json 对齐。
+  # 以 name/file 列表表达：Spring Boot 属性名元素仅支持 ASCII，非 ASCII 的 map key 无法绑定。
+  image-categories:
+    - name: 卤味凉菜
+      file: cat-braised-cold.svg
+    - name: 奶茶饮品
+      file: cat-fruit-tea.svg
+    - name: 日式简餐
+      file: cat-japanese-bento.svg
+    - name: 港式茶点
+      file: cat-dim-sum.svg
+    - name: 湘菜快餐
+      file: cat-hunan-rice.svg
+    - name: 炸鸡串串
+      file: cat-fried-skewers.svg
+    - name: 炸鸡汉堡
+      file: cat-fried-chicken-burger.svg
+    - name: 米粉面食
+      file: cat-rice-noodles.svg
+    - name: 轻食沙拉
+      file: cat-salad-bowl.svg
+    - name: 鸭脖卤味
+      file: cat-braised-duck.svg
+    - name: 麻辣烫
+      file: cat-malatang.svg
+    - name: 龙虾烧烤
+      file: cat-bbq-crayfish.svg
+    # 未知品类兜底
+    - name: default
+      file: cat-default.svg
