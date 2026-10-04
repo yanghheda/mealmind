@@ -8,13 +8,15 @@
 固定随机种子 random.seed(20261004)，同样的输入必得逐字节一致的输出。
 12 家精选商家 / 菜单来自 tools/curated_base.json（由 prototype/mock.js 程序化导出），
 m13–m40 为程序化生成的虚构商家。禁止真实品牌。
+
+商家 logo_url 与菜品 image_url 一律写入 NULL：内置生图服务的地址属外部依赖，
+不在数据层固化，由业务服务在返回 DTO 时按名称拼接。
 """
 
 import json
 import os
 import random
 import re
-from urllib.parse import quote
 
 SEED = 20261004
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -24,23 +26,6 @@ OUT_SQL = os.path.normpath(os.path.join(HERE, "..", "20_seed.sql"))
 # ---------------------------------------------------------------------------
 # 基础工具
 # ---------------------------------------------------------------------------
-
-def img(prompt):
-    """与 prototype/mock.js 的内置图像服务构造方式保持一致。"""
-    return (
-        "https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt="
-        + quote(prompt, safe="")
-        + "&image_size=square"
-    )
-
-
-_PAREN = re.compile(r"（[^）]*）")
-
-
-def dish_img(name):
-    clean = _PAREN.sub("", str(name or ""))
-    return img(clean + "，美食摄影，特写，诱人，中式")
-
 
 def esc_str(v):
     if v is None:
@@ -571,7 +556,7 @@ def build():
         open_t, close_t = CURATED_TIMES[mid]
         merchants.append({
             "id": mid, "name": m["name"], "category": CURATED_CATEGORY[mid],
-            "logo_url": img(m["name"] + "，美食摄影"),
+            "logo_url": None,
             "rating": float(m["rating"]),
             "monthly_sales": parse_sales(m["sales"]),
             "delivery_minutes": int(m["mins"]),
@@ -599,7 +584,7 @@ def build():
                 origin = float(d["o"]) if d.get("o") is not None else None
                 dishes.append({
                     "id": did, "merchant_id": mid, "category_id": cat_id,
-                    "name": name, "description": desc, "image_url": dish_img(name),
+                    "name": name, "description": desc, "image_url": None,
                     "price": price, "origin_price": origin,
                     "monthly_sales": parse_sales(d["s"]),
                     "is_available": 0 if rng.random() < 0.07 else 1,
@@ -653,11 +638,35 @@ def build():
         "支持备注口味，尽快为您出餐。",
         "下单后现做，高峰期可能稍慢。",
     ]
-    promo_pool = ["爆 ¥12", "满 30 减 12", "满 20 减 6", "满 25 减 8",
-                  "新客立减 5 元", "新客立减 8 元", "3 元店铺红包",
-                  "1 元店铺红包", "第二杯半价", "满 50 减 15"]
-    feature_pool = ["明厨亮灶", "食无忧", "极速退", "超时可免单",
-                    "安心吃", "堂食店", "真材实料", "千人回购"]
+    # 营销标签与特色标签按品类收窄，避免「米粉店挂第二杯半价」这类不搭的组合
+    promo_pools = {
+        "炸鸡串串": ["爆 ¥12", "满 30 减 12", "新客立减 5 元", "3 元店铺红包"],
+        "鸭脖卤味": ["爆 ¥12", "满 20 减 6", "3 元店铺红包", "满 30 减 12"],
+        "港式茶点": ["满 40 减 10", "新客立减 8 元", "满 50 减 15"],
+        "湘菜快餐": ["满 25 减 8", "满 30 减 12", "新客立减 5 元"],
+        "麻辣烫": ["新客立减 8 元", "满 25 减 8", "爆 ¥12"],
+        "炸鸡汉堡": ["爆 ¥9.9", "满 20 减 5", "新客立减 5 元"],
+        "米粉面食": ["满 20 减 6", "新客立减 5 元", "爆 ¥12"],
+        "卤味凉菜": ["满 20 减 6", "1 元店铺红包", "爆 ¥12", "满 25 减 8"],
+        "轻食沙拉": ["新客立减 10 元", "满 40 减 10", "满 50 减 15"],
+        "日式简餐": ["满 50 减 15", "满 40 减 10", "新客立减 8 元"],
+        "奶茶饮品": ["第二杯半价", "新客立减 5 元", "满 20 减 6"],
+        "龙虾烧烤": ["满 100 减 30", "满 50 减 15", "爆 ¥12"],
+    }
+    feature_pools = {
+        "炸鸡串串": ["明厨亮灶", "极速退", "安心吃"],
+        "鸭脖卤味": ["明厨亮灶", "食无忧", "千人回购"],
+        "港式茶点": ["堂食店", "超时可免单", "真材实料"],
+        "湘菜快餐": ["明厨亮灶", "安心吃", "极速退"],
+        "麻辣烫": ["明厨亮灶", "极速退", "真材实料"],
+        "炸鸡汉堡": ["食无忧", "极速退", "明厨亮灶"],
+        "米粉面食": ["明厨亮灶", "真材实料", "安心吃"],
+        "卤味凉菜": ["明厨亮灶", "千人回购", "食无忧"],
+        "轻食沙拉": ["低卡", "安心吃", "真材实料"],
+        "日式简餐": ["明厨亮灶", "堂食店", "真材实料"],
+        "奶茶饮品": ["真材实料", "千人回购", "极速退"],
+        "龙虾烧烤": ["超时可免单", "明厨亮灶", "千人回购"],
+    }
 
     used_names = set()
     for gi in range(28):
@@ -688,21 +697,21 @@ def build():
             rank_label = None
         merchants.append({
             "id": mid, "name": nm, "category": cat,
-            "logo_url": img(nm + "，美食摄影"), "rating": rating,
+            "logo_url": None, "rating": rating,
             "monthly_sales": monthly_sales, "delivery_minutes": delivery_minutes,
             "distance_meters": distance_meters, "min_order_amount": min_order,
             "delivery_fee": delivery_fee, "is_open": is_open,
             "open_time": open_t, "close_time": close_t,
             "notice": rng.choice(notices), "rank_label": rank_label,
         })
-        for i, t in enumerate(rng.sample(promo_pool, rng.randint(1, 3)), 1):
+        for i, t in enumerate(rng.sample(promo_pools[cat], rng.randint(1, 3)), 1):
             merchant_tags.append((mid, t, "PROMO", i))
-        for i, t in enumerate(rng.sample(feature_pool, rng.randint(0, 2)), 1):
+        for i, t in enumerate(rng.sample(feature_pools[cat], rng.randint(0, 2)), 1):
             merchant_tags.append((mid, t, "FEATURE", i))
 
         pool = POOLS[cat]
         offset = rng.randint(0, 5)
-        k = rng.randint(15, 20)
+        k = rng.randint(15, 21)
         picked = (pool[offset:] + pool[:offset])[:k]
 
         cat_seq = {}          # 分类名 -> 序号
@@ -732,7 +741,7 @@ def build():
                 msales += rng.randint(100, 600)
             dishes.append({
                 "id": did, "merchant_id": mid, "category_id": cat_id,
-                "name": dname, "description": ddesc, "image_url": dish_img(dname),
+                "name": dname, "description": ddesc, "image_url": None,
                 "price": price, "origin_price": origin, "monthly_sales": msales,
                 "is_available": 0 if rng.random() < 0.07 else 1,
                 "is_combo": 1 if combo else 0, "sort_no": dseq,
