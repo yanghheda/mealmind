@@ -1,7 +1,10 @@
 package com.mealmind.biz.config;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -38,6 +41,103 @@ public class AppProperties {
     /** 品类 -> 图片文件名映射。以 name/file 列表表达：Spring Boot 的属性名元素仅支持 ASCII，
      *  非 ASCII 的 map key 无法绑定，故用列表承载（值可为中文）。 */
     private List<CategoryImage> imageCategories = new ArrayList<>();
+
+    /** 决策链路配置（技术方案 §8.5）。 */
+    private Decision decision = new Decision();
+
+    public Decision getDecision() {
+        return decision;
+    }
+
+    public void setDecision(Decision decision) {
+        this.decision = decision;
+    }
+
+    /** 决策链路：权重、候选上限、整轮超时、幂等与并发限制、档位版本。 */
+    public static class Decision {
+
+        /** 综合分权重（PRD 5.4 默认权重：口味 30 / 预算 25 / 时效 15 / 口碑 20 / 场景 10）。 */
+        private Map<String, BigDecimal> weights = new LinkedHashMap<>(Map.of(
+                "taste", new BigDecimal("0.30"),
+                "budget", new BigDecimal("0.25"),
+                "timeliness", new BigDecimal("0.15"),
+                "reputation", new BigDecimal("0.20"),
+                "scene", new BigDecimal("0.10")));
+
+        /** 参与打分的候选上限（超过按评分与月售初排截断）。 */
+        private int maxCandidates = 20;
+
+        /** 整轮决策超时（毫秒），超时返回已得结果 + error。 */
+        private int runTimeoutMs = 12000;
+
+        /** 幂等窗口（秒）：同一会话相同 text + mode 视为重复。 */
+        private int idempotencySeconds = 5;
+
+        /** 同一会话并发 run 上限。 */
+        private int maxConcurrentRuns = 3;
+
+        /** 档位版本：改档位定义必须升版本号（缓存键与决策记录都引用它）。 */
+        private String rubricVersion = "v1.2";
+
+        /** SSE 心跳间隔（秒）。 */
+        private int heartbeatSeconds = 15;
+
+        public Map<String, BigDecimal> getWeights() {
+            return weights;
+        }
+
+        public void setWeights(Map<String, BigDecimal> weights) {
+            this.weights = weights;
+        }
+
+        public int getMaxCandidates() {
+            return maxCandidates;
+        }
+
+        public void setMaxCandidates(int maxCandidates) {
+            this.maxCandidates = maxCandidates;
+        }
+
+        public int getRunTimeoutMs() {
+            return runTimeoutMs;
+        }
+
+        public void setRunTimeoutMs(int runTimeoutMs) {
+            this.runTimeoutMs = runTimeoutMs;
+        }
+
+        public int getIdempotencySeconds() {
+            return idempotencySeconds;
+        }
+
+        public void setIdempotencySeconds(int idempotencySeconds) {
+            this.idempotencySeconds = idempotencySeconds;
+        }
+
+        public int getMaxConcurrentRuns() {
+            return maxConcurrentRuns;
+        }
+
+        public void setMaxConcurrentRuns(int maxConcurrentRuns) {
+            this.maxConcurrentRuns = maxConcurrentRuns;
+        }
+
+        public String getRubricVersion() {
+            return rubricVersion;
+        }
+
+        public void setRubricVersion(String rubricVersion) {
+            this.rubricVersion = rubricVersion;
+        }
+
+        public int getHeartbeatSeconds() {
+            return heartbeatSeconds;
+        }
+
+        public void setHeartbeatSeconds(int heartbeatSeconds) {
+            this.heartbeatSeconds = heartbeatSeconds;
+        }
+    }
 
     public String getAgentBaseUrl() {
         return agentBaseUrl;

@@ -62,6 +62,20 @@ mealmind:
   image-base-url: "${IMAGE_BASE_URL:}"
   # 游客昵称前缀
   nickname-prefix: "干饭人_"
+  # 决策链路：权重 / 候选上限 / 整轮超时 / 幂等与并发 / 档位版本（对齐技术方案 §8.5）
+  decision:
+    weights:
+      taste: 0.30
+      budget: 0.25
+      timeliness: 0.15
+      reputation: 0.20
+      scene: 0.10
+    max-candidates: 20
+    run-timeout-ms: 12000
+    idempotency-seconds: 5
+    max-concurrent-runs: 3
+    rubric-version: v1.2
+    heartbeat-seconds: 15
   # 分页默认值与上限
   page-size-default: 10
   page-size-max: 50
