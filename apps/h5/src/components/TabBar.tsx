@@ -11,7 +11,7 @@ interface TabBarProps {
 
 /**
  * 冻结导航（设计契约 §5 变体 A）。
- * 消息 / AI 点外卖 / 我的 未实现，统一走 §7 占位提示；购物车角标由真实购物车数量驱动。
+ * 消息 / 我的 未实现，统一走 §7 占位提示；AI 点外卖进会话页；购物车角标由真实购物车数量驱动。
  */
 export function TabBar({ active }: TabBarProps) {
   const { data } = useCart()
@@ -29,12 +29,12 @@ export function TabBar({ active }: TabBarProps) {
         <span>消息</span>
         <i className="tab-dot" />
       </button>
-      <button className="tab tab-ai" type="button" onClick={placeholder}>
+      <Link className="tab tab-ai" data-nav="agent" to="/agent">
         <span className="tab-ai-btn">
           <Icon name="sparkles" size={24} />
         </span>
         <span>AI 点外卖</span>
-      </button>
+      </Link>
       <Link className={active === 'cart' ? 'tab is-active' : 'tab'} data-nav="cart" to="/cart">
         <span className="tab-ico">
           <Icon name="shopping-cart" />

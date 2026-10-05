@@ -5,8 +5,9 @@ import { Welcome } from './pages/Welcome'
 import { Home } from './pages/Home'
 import { Merchant } from './pages/Merchant'
 import { Cart } from './pages/Cart'
+import { Agent } from './pages/Agent'
 
-/** 路由表：封面 / 首页 / 商家详情 / 购物车；其余路径回封面。 */
+/** 路由表：封面 / 首页 / 商家详情 / 购物车 / AI 会话；其余路径回封面。 */
 function App() {
   return (
     <>
@@ -33,6 +34,14 @@ function App() {
           element={
             <RequireSession>
               <Cart />
+            </RequireSession>
+          }
+        />
+        <Route
+          path="/agent"
+          element={
+            <RequireSession>
+              <Agent />
             </RequireSession>
           }
         />

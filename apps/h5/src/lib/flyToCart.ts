@@ -1,12 +1,13 @@
 /**
- * 加购飞入动效：图片从来源卡片抛物线飞向购物车（Tab 或商家页底部购物车条）。
- * 移植自 prototype/app.js 的 flyToCart / flyFrom，供商家页与首页共用。
+ * 加购飞入动效：图片从来源卡片抛物线飞向购物车（Tab、商家页底部购物车条或会话页购物车胶囊）。
+ * 移植自 prototype/app.js 的 flyToCart / flyFrom，商家页、首页与会话页共用。
  */
 export function flyToCart(fromEl: HTMLElement | null, imageUrl?: string): void {
   if (!fromEl) return
   const target =
     document.querySelector('.tabbar [data-nav="cart"]') ||
-    document.querySelector('.cartbar .cb-ico')
+    document.querySelector('.cartbar .cb-ico') ||
+    document.querySelector('.cart-pill')
   if (!target) return
 
   const start = fromEl.getBoundingClientRect()
@@ -38,7 +39,7 @@ export function flyToCart(fromEl: HTMLElement | null, imageUrl?: string): void {
 
   window.setTimeout(() => {
     fly.remove()
-    const badge = document.querySelector<HTMLElement>('.tab-badge, .cb-badge')
+    const badge = document.querySelector<HTMLElement>('.tab-badge, .cb-badge, .cp-badge')
     if (badge) {
       badge.classList.remove('pop')
       void badge.offsetWidth

@@ -1,0 +1,508 @@
+/* =========================================================
+   MealMind · AI 决策会话页（Shell 变体 C）
+   页面级样式，全部作用域收敛在 .app--agent 下，token 复用 prototype.css
+   ========================================================= */
+
+.app--agent {
+  background: var(--c-bg);
+  min-height: 100vh;
+}
+
+/* ---------- 顶部栏 ---------- */
+.app--agent .agent-head {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #fff;
+  border-bottom: 1px solid var(--c-border);
+}
+.app--agent .agent-head .head-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.app--agent .cart-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 12px 0 10px;
+  border-radius: 999px;
+  background: #fff3ee;
+  color: var(--c-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.app--agent .cart-pill svg {
+  width: 16px;
+  height: 16px;
+}
+.app--agent .cp-badge {
+  position: absolute;
+  top: -5px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--c-red);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  font-style: normal;
+}
+.app--agent .cp-badge.pop {
+  animation: agent-badge-pop 0.35s ease;
+}
+@keyframes agent-badge-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+.app--agent .icon-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #444;
+}
+.app--agent .icon-btn svg {
+  width: 19px;
+  height: 19px;
+}
+.app--agent .icon-btn:disabled {
+  opacity: 0.35;
+}
+
+/* ---------- 会话区 ---------- */
+.app--agent .chat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 12px 170px;
+}
+
+/* ---------- 欢迎态 ---------- */
+.app--agent .welcome {
+  padding: 26px 4px 0;
+}
+.app--agent .welcome-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+}
+.app--agent .welcome-ico {
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  background: var(--grad-ai);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-float);
+}
+.app--agent .welcome h2 {
+  font-size: 18px;
+  font-weight: 700;
+}
+.app--agent .welcome .sub {
+  font-size: 12px;
+  color: var(--c-text-sub);
+}
+.app--agent .welcome-note {
+  margin-top: 16px;
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--c-text-ter);
+}
+.app--agent .sample-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.app--agent .sample {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: var(--shadow-card);
+  font-size: 12.5px;
+  color: #333;
+}
+.app--agent .sample .txt {
+  flex: 1;
+}
+.app--agent .sample svg {
+  color: var(--c-primary);
+  flex: none;
+}
+.app--agent .ctx-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  margin: 0 auto 12px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  background: var(--c-pink-tint);
+  color: #c2410c;
+}
+
+/* ---------- 对话气泡与卡片 ---------- */
+.app--agent .bubble-user {
+  align-self: flex-end;
+  max-width: 84%;
+  padding: 10px 13px;
+  border-radius: 14px 14px 4px 14px;
+  background: linear-gradient(135deg, #ffe9dc, #ffd9c7);
+  color: #7a2e0e;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.app--agent .ai-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: var(--shadow-card);
+}
+.app--agent .ai-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--c-text-sub);
+  margin-bottom: 8px;
+}
+.app--agent .ai-label svg {
+  color: var(--c-primary);
+  flex: none;
+}
+.app--agent .mini-tag {
+  font-style: normal;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #f5f6f8;
+  color: var(--c-text-ter);
+}
+.app--agent .u-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.app--agent .u-chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--c-pink-tint);
+  color: #c2410c;
+  font-size: 11.5px;
+}
+.app--agent .note-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 9px;
+  font-size: 11px;
+  color: var(--c-success);
+}
+.app--agent .note-line svg {
+  flex: none;
+}
+.app--agent .ai-card--error .ai-label {
+  color: var(--c-danger);
+}
+.app--agent .ai-card--error .ai-label svg {
+  color: var(--c-danger);
+}
+.app--agent .ai-card--error .btn {
+  margin-top: 10px;
+}
+.app--agent .relax-chips {
+  margin-top: 4px;
+}
+
+/* ---------- 进度步骤 ---------- */
+.app--agent .steps {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.app--agent .step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--c-text-sub);
+}
+.app--agent .step .dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid #e7e8eb;
+  flex: none;
+  position: relative;
+}
+.app--agent .step.doing .dot {
+  border-color: var(--c-primary);
+  border-top-color: transparent;
+  animation: agent-spin 0.8s linear infinite;
+}
+.app--agent .step.done .dot {
+  background: var(--c-success);
+  border-color: var(--c-success);
+}
+.app--agent .step.done .dot::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1.5px;
+  width: 3.5px;
+  height: 7px;
+  border-right: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(45deg);
+}
+@keyframes agent-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- 结果与推荐卡 ---------- */
+.app--agent .results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.app--agent .results-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 0;
+}
+.app--agent .results-head h3 {
+  font-size: 13px;
+  font-weight: 700;
+}
+.app--agent .results-sub {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--c-text-ter);
+}
+.app--agent .refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--c-primary);
+  font-weight: 600;
+}
+.app--agent .rec-head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.app--agent .rec-img {
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex: none;
+  background: #f2f3f5;
+}
+.app--agent .rec-title h4 {
+  font-size: 15px;
+  font-weight: 700;
+}
+.app--agent .rec-title p {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--c-text-sub);
+}
+.app--agent .rec-score {
+  margin-left: auto;
+  text-align: center;
+  flex: none;
+  padding-left: 8px;
+}
+.app--agent .rec-score b {
+  font-family: var(--font-price);
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  background: var(--grad-cta);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+.app--agent .rec-score span {
+  display: block;
+  margin-top: 3px;
+  font-size: 9.5px;
+  color: var(--c-text-ter);
+}
+.app--agent .rec-dims {
+  margin-top: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.app--agent .dim {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--c-text-sub);
+}
+.app--agent .dim-k {
+  width: 52px;
+  flex: none;
+}
+.app--agent .dim-bar {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: #f0f1f3;
+  overflow: hidden;
+}
+.app--agent .dim-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #ff8a00, #ff3b1f);
+}
+.app--agent .dim b {
+  width: 26px;
+  text-align: right;
+  font-family: var(--font-price);
+  font-weight: 600;
+  color: #444;
+}
+.app--agent .rec-meta {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+.app--agent .conf {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+}
+.app--agent .conf.high {
+  background: #eaf7ee;
+  color: #1e9e57;
+}
+.app--agent .conf.mid {
+  background: #fff6e5;
+  color: #b7791f;
+}
+.app--agent .conf.low {
+  background: #fff1ee;
+  color: #d93025;
+}
+.app--agent .rec-reason {
+  color: var(--c-text-sub);
+}
+.app--agent .rec-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.app--agent .rec-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 11px;
+}
+.app--agent .add-btn {
+  min-width: 98px;
+  height: 32px;
+  font-size: 13px;
+  border-radius: 999px;
+}
+.app--agent .rec-link {
+  font-size: 12px;
+  color: var(--c-text-ter);
+}
+
+/* ---------- 底部输入区 ---------- */
+.app--agent .agent-inputbar {
+  position: fixed;
+  z-index: 40;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 414px;
+  padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--c-border);
+}
+.app--agent .chips-scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.app--agent .chips-scroll::-webkit-scrollbar {
+  display: none;
+}
+.app--agent .input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.app--agent .input-pill {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: #f4f5f7;
+}
+.app--agent .input-pill input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 13.5px;
+}
+.app--agent .send-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--grad-cta);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(255, 80, 0, 0.3);
+}
+.app--agent .send-btn svg {
+  width: 19px;
+  height: 19px;
+}
+.app--agent .send-btn:disabled {
+  opacity: 0.5;
+}

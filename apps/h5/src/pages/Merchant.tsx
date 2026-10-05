@@ -19,7 +19,6 @@ import {
   minutesText,
   salesText,
 } from '../lib/format'
-import { PLACEHOLDER_TOAST } from '../lib/constants'
 import { showToast } from '../store/ui'
 import type { AddCartItemRequest, DishView, MenuCategoryView } from '../api/types'
 import './Merchant.css'
@@ -231,7 +230,11 @@ export function Merchant() {
           {couponVisible && <i className="tag tag-orange m-tab-tag">明厨亮灶</i>}
         </div>
 
-        <button className="ai-strip" type="button" onClick={() => showToast(PLACEHOLDER_TOAST)}>
+        <button
+          className="ai-strip"
+          type="button"
+          onClick={() => navigate(`/agent?merchantId=${encodeURIComponent(id)}`)}
+        >
           <Icon name="sparkles" size={18} />
           <span>让 AI 帮我选这家</span>
           <span className="ai-go">

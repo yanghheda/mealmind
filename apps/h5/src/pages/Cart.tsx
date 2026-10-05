@@ -8,7 +8,7 @@ import { SafeImg } from '../components/SafeImg'
 import { deleteCartItem, updateCartItem } from '../api/cart'
 import { CART_QUERY_KEY, useCart } from '../hooks/useCart'
 import { formatMoney } from '../lib/format'
-import { LOCATION_NAME, PLACEHOLDER_TOAST } from '../lib/constants'
+import { LOCATION_NAME } from '../lib/constants'
 import { showToast } from '../store/ui'
 import type { CartGroupView, CartItemView } from '../api/types'
 import './Cart.css'
@@ -124,13 +124,9 @@ export function Cart() {
               <Icon name="shopping-cart" size={40} />
               <p className="empty-title">购物车还是空的</p>
               <div className="empty-acts">
-                <button
-                  className="btn btn-outline btn-sm"
-                  type="button"
-                  onClick={() => showToast(PLACEHOLDER_TOAST)}
-                >
+                <Link className="btn btn-outline btn-sm" to="/agent">
                   去 AI 决策
-                </button>
+                </Link>
               </div>
             </div>
           )}
