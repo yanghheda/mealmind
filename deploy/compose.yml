@@ -75,7 +75,7 @@ services:
       # 生成式模型（理解与表达）：阿里云百炼 qwen3.8
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
       QWEN_BASE_URL: ${QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
-      QWEN_MODEL: ${QWEN_MODEL:-qwen3.8-flash}
+      QWEN_MODEL: ${QWEN_MODEL:-qwen3.8-max-0902}
       # 降级状态机阈值（技术方案 §6.1）
       DEGRADE_PARTIAL_THRESHOLD: ${DEGRADE_PARTIAL_THRESHOLD:-0.3}
       DEGRADE_COOLDOWN_SECONDS: ${DEGRADE_COOLDOWN_SECONDS:-60}
