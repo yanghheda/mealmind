@@ -120,6 +120,36 @@ public class AgentClient {
         }
     }
 
+    /** 评测打分返回（profile + 卡片数组，均为原始 JSON 由调用方解析）。 */
+    public record ScoreResult(JsonNode profile, JsonNode cards) {
+    }
+
+    /** 评测打分：直接把候选交给 Agent，返回 profile + 逐菜分（不走 SSE）。 */
+    public ScoreResult score(String text, List<AgentCandidate> candidates, boolean withReason) {
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("text", text);
+        payload.put("candidates", candidates);
+        payload.put("withReason", withReason);
+        HttpRequest request = base("/internal/score")
+                .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(120))
+                .POST(HttpRequest.BodyPublishers.ofString(toJson(payload), StandardCharsets.UTF_8))
+                .build();
+        try {
+            HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new AgentUnavailableException("agent score returned " + response.statusCode());
+            }
+            JsonNode root = objectMapper.readTree(response.body());
+            return new ScoreResult(root.path("profile"), root.path("cards"));
+        } catch (IOException ex) {
+            throw new AgentUnavailableException("agent score failed: " + ex.getMessage(), ex);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new AgentUnavailableException("agent score interrupted", ex);
+        }
+    }
+
     private HttpRequest.Builder base(String path) {
         String baseUrl = properties.getAgentBaseUrl();
         String trimmed = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;

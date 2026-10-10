@@ -76,6 +76,8 @@ mealmind:
     max-concurrent-runs: 3
     rubric-version: v1.2
     heartbeat-seconds: 15
+    # 打分缓存 TTL（秒）：键含 rubric 版本与需求指纹（技术方案 §6.3）
+    score-cache-ttl-seconds: 600
   # 分页默认值与上限
   page-size-default: 10
   page-size-max: 50

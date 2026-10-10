@@ -9,5 +9,6 @@ public record DoneView(
         long latencyMs,
         BigDecimal costYuan,
         String rubricVersion,
-        List<RelaxOption> relaxOptions) {
+        List<RelaxOption> relaxOptions,
+        String degradeLevel) {
 }

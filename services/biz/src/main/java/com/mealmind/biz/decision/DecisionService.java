@@ -9,9 +9,11 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -19,6 +21,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -76,7 +79,9 @@ public class DecisionService {
     private static final String MODE_MERCHANT = "MERCHANT";
     private static final String STATUS_RUNNING = "RUNNING";
     private static final String STATUS_DONE = "DONE";
+    private static final String STATUS_DEGRADED = "DEGRADED";
     private static final String STATUS_FAILED = "FAILED";
+    private static final String DEGRADE_NORMAL = "NORMAL";
     private static final int TEXT_MAX_LENGTH = 200;
 
     private final DecisionRunMapper runMapper;
@@ -88,6 +93,7 @@ public class DecisionService {
     private final DishSpecOptionMapper specOptionMapper;
     private final ConstraintEngine constraintEngine;
     private final ScoreRanker scoreRanker;
+    private final ScoreCache scoreCache;
     private final RunHub runHub;
     private final AgentClient agentClient;
     private final AppProperties properties;
@@ -107,6 +113,7 @@ public class DecisionService {
                            DishSpecOptionMapper specOptionMapper,
                            ConstraintEngine constraintEngine,
                            ScoreRanker scoreRanker,
+                           ScoreCache scoreCache,
                            RunHub runHub,
                            AgentClient agentClient,
                            AppProperties properties,
@@ -122,6 +129,7 @@ public class DecisionService {
         this.specOptionMapper = specOptionMapper;
         this.constraintEngine = constraintEngine;
         this.scoreRanker = scoreRanker;
+        this.scoreCache = scoreCache;
         this.runHub = runHub;
         this.agentClient = agentClient;
         this.properties = properties;
@@ -180,7 +188,7 @@ public class DecisionService {
         run.setMode(mode);
         run.setMerchantId(merchantId);
         run.setStatus(STATUS_RUNNING);
-        run.setDegradeLevel("NORMAL");
+        run.setDegradeLevel(DEGRADE_NORMAL);
         run.setRubricVersion(properties.getDecision().getRubricVersion());
         run.setCandidateCount(0);
         runMapper.insert(run);
@@ -249,7 +257,8 @@ public class DecisionService {
                 stream == null ? 0 : stream.lastSeq(),
                 run.getLatencyMs(),
                 run.getCostYuan(),
-                run.getRubricVersion());
+                run.getRubricVersion(),
+                run.getDegradeLevel());
     }
 
     // ------------------------------------------------------------------ 编排执行
@@ -263,8 +272,13 @@ public class DecisionService {
         AtomicBoolean finished = new AtomicBoolean(false);
         AtomicBoolean failed = new AtomicBoolean(false);
         AtomicReference<DecisionProfile> profileRef = new AtomicReference<>();
+        AtomicReference<String> degradeLevelRef = new AtomicReference<>(DEGRADE_NORMAL);
         Map<String, CandidateFact> facts = new HashMap<>();
         List<RawCard> rawCards = new ArrayList<>();
+        Map<String, String> reasons = new HashMap<>();
+        Set<String> pendingCacheWrites = new HashSet<>();
+        AtomicInteger cachedHits = new AtomicInteger();
+        AtomicInteger candidateTotal = new AtomicInteger();
 
         ScheduledFuture<?> timeout = watchdog.schedule(() -> {
             if (finished.compareAndSet(false, true)) {
@@ -281,10 +295,19 @@ public class DecisionService {
         try (InputStream body = agentClient.decide(runId, text, mode, merchantId)) {
             agentClient.readEvents(body, event -> {
                 switch (event.name()) {
-                    case "understand" -> handleUnderstand(runId, stream, mode, merchantId, event, profileRef, facts);
-                    case "scoring" -> stream.emit("scoring", event.data());
+                    case "understand" -> handleUnderstand(runId, stream, mode, merchantId, event, profileRef, facts,
+                            rawCards, reasons, pendingCacheWrites, cachedHits, candidateTotal);
+                    // 进度把缓存命中的部分补回来，前端看到的仍是全部候选的进度
+                    case "scoring" -> stream.emit("scoring", mergeScoringProgress(event.data(), cachedHits.get(), candidateTotal.get()));
                     case "card" -> handleCard(stream, event.data(), facts, rawCards);
-                    case "reason.delta" -> stream.emit("reason.delta", event.data());
+                    case "reason.delta" -> {
+                        reasons.put(event.data().path("dishId").asText(), event.data().path("text").asText(""));
+                        stream.emit("reason.delta", event.data());
+                    }
+                    case "degraded" -> {
+                        degradeLevelRef.set(event.data().path("level").asText(DEGRADE_NORMAL));
+                        stream.emit("degraded", event.data());
+                    }
                     case "error" -> {
                         failed.set(true);
                         stream.emit("error", event.data());
@@ -300,7 +323,8 @@ public class DecisionService {
                 if (failed.get()) {
                     stream.finish();
                 } else {
-                    finishRun(runId, stream, startedAt, profileRef.get(), rawCards, facts);
+                    finishRun(runId, stream, startedAt, profileRef.get(), rawCards, facts, degradeLevelRef.get(),
+                            reasons, pendingCacheWrites);
                 }
             }
         } catch (Exception ex) {
@@ -321,11 +345,17 @@ public class DecisionService {
     private void handleUnderstand(String runId, RunStream stream, String mode, String merchantId,
                                   AgentClient.AgentEvent event,
                                   AtomicReference<DecisionProfile> profileRef,
-                                  Map<String, CandidateFact> facts) {
+                                  Map<String, CandidateFact> facts,
+                                  List<RawCard> rawCards,
+                                  Map<String, String> reasons,
+                                  Set<String> pendingCacheWrites,
+                                  AtomicInteger cachedHits,
+                                  AtomicInteger candidateTotal) {
         JsonNode data = event.data();
         DecisionProfile profile = toProfile(data.path("profile"));
         profileRef.set(profile);
-        updateRunUnderstanding(runId, data.path("profile"), fingerprint(profile));
+        String fingerprint = fingerprint(profile);
+        updateRunUnderstanding(runId, data.path("profile"), fingerprint);
         stream.emit("understand", data);
 
         FilterResult result = constraintEngine.filter(profile, mode, merchantId);
@@ -334,11 +364,51 @@ public class DecisionService {
         }
         updateRunFiltered(runId, result);
         stream.emit("filtered", new FilteredView(result.candidateCount(), result.poolSize(), result.detail()));
-        // 协作式编排：过滤节点由业务服务执行，回填后图继续打分
-        agentClient.provideCandidates(runId,
-                result.candidates().stream().map(CandidateFact::payload).toList());
+        candidateTotal.set(result.candidateCount());
+
+        // 打分缓存（cache-aside）：命中的菜品直接复用，未命中的才交给 Agent 打分
+        List<AgentCandidate> all = result.candidates().stream().map(CandidateFact::payload).toList();
+        Map<String, ScoreCache.Entry> hits = scoreCache.getMany(fingerprint, all.stream()
+                .map(candidate -> candidate.dishId()).toList());
+
+        List<AgentCandidate> misses = new ArrayList<>();
+        for (AgentCandidate candidate : all) {
+            ScoreCache.Entry entry = hits.get(candidate.dishId());
+            if (entry == null) {
+                misses.add(candidate);
+                pendingCacheWrites.add(candidate.dishId());
+                continue;
+            }
+            cachedHits.incrementAndGet();
+            RawCard raw = new RawCard(candidate.dishId(), entry.dims(), entry.mode());
+            emitCard(stream, raw, facts, rawCards);
+            if (entry.reason() != null && !entry.reason().isBlank()) {
+                reasons.put(candidate.dishId(), entry.reason());
+                stream.emit("reason.delta", Map.of("dishId", candidate.dishId(), "text", entry.reason()));
+            }
+        }
+        log.info("run {} cache hit {}/{} candidates, scoring {} via agent",
+                runId, hits.size(), all.size(), misses.size());
+        // 全部命中时 Agent 不会产出打分进度，这里补一条，避免前端进度停在「逐菜打分」
+        if (misses.isEmpty() && !all.isEmpty()) {
+            stream.emit("scoring", Map.of("done", all.size(), "total", all.size(),
+                    "mode", cachedMode(hits, all)));
+        }
+        // 协作式编排：过滤节点由业务服务执行，回填后图继续打分（全部命中时不回填，图直接结束）
+        agentClient.provideCandidates(runId, misses);
     }
 
+    private String cachedMode(Map<String, ScoreCache.Entry> hits, List<AgentCandidate> all) {
+        for (AgentCandidate candidate : all) {
+            ScoreCache.Entry entry = hits.get(candidate.dishId());
+            if (entry != null && entry.mode() != null) {
+                return entry.mode();
+            }
+        }
+        return "RULE";
+    }
+
+    /** 把 Agent 的 card 事件写成 RawCard 并即时下发（缓存命中路径复用同一出口）。 */
     private void handleCard(RunStream stream, JsonNode data, Map<String, CandidateFact> facts, List<RawCard> rawCards) {
         RawCard raw;
         try {
@@ -347,6 +417,10 @@ public class DecisionService {
             log.warn("invalid card payload: {}", data, ex);
             return;
         }
+        emitCard(stream, raw, facts, rawCards);
+    }
+
+    private void emitCard(RunStream stream, RawCard raw, Map<String, CandidateFact> facts, List<RawCard> rawCards) {
         CandidateFact fact = facts.get(raw.dishId());
         if (fact == null) {
             log.warn("card for unknown dish, dishId={}", raw.dishId());
@@ -360,18 +434,50 @@ public class DecisionService {
     }
 
     private void finishRun(String runId, RunStream stream, long startedAt,
-                           DecisionProfile profile, List<RawCard> rawCards, Map<String, CandidateFact> facts) {
+                           DecisionProfile profile, List<RawCard> rawCards, Map<String, CandidateFact> facts,
+                           String degradeLevel, Map<String, String> reasons, Set<String> pendingCacheWrites) {
         List<DecisionCardView> cards = rawCards.isEmpty() ? List.of() : scoreRanker.rank(rawCards, facts);
         long latencyMs = System.currentTimeMillis() - startedAt;
         BigDecimal costYuan = BigDecimal.ZERO.setScale(5, RoundingMode.HALF_UP);
         if (!cards.isEmpty()) {
             persistDecision(runId, cards);
         }
-        markRunDone(runId, latencyMs, costYuan, cards.size());
+        markRunDone(runId, latencyMs, costYuan, cards.size(), degradeLevel);
+        writeScoreCache(profile, rawCards, pendingCacheWrites, reasons);
         List<RelaxOption> relaxOptions = cards.isEmpty() ? relaxOptions(profile) : List.of();
         stream.emit("done", new DoneView(cards, latencyMs, costYuan,
-                properties.getDecision().getRubricVersion(), relaxOptions));
+                properties.getDecision().getRubricVersion(), relaxOptions, degradeLevel));
         stream.finish();
+    }
+
+    /** 回写本次真正打过分的菜品；理由缺失的条目不写，避免后续命中时缺理由。 */
+    private void writeScoreCache(DecisionProfile profile, List<RawCard> rawCards,
+                                 Set<String> pendingWrites, Map<String, String> reasons) {
+        if (profile == null || pendingWrites.isEmpty()) {
+            return;
+        }
+        Map<String, ScoreCache.Entry> entries = new LinkedHashMap<>();
+        for (RawCard raw : rawCards) {
+            if (!pendingWrites.contains(raw.dishId())) {
+                continue;
+            }
+            String reason = reasons.get(raw.dishId());
+            if (reason == null || reason.isBlank()) {
+                continue;
+            }
+            entries.put(raw.dishId(), new ScoreCache.Entry(raw.dims(), raw.mode(), reason));
+        }
+        scoreCache.putMany(fingerprint(profile), entries);
+    }
+
+    /** 把缓存命中数并入 Agent 的进度事件，前端看到的 total 始终是全部候选。 */
+    private Map<String, Object> mergeScoringProgress(JsonNode data, int cachedHits, int candidateTotal) {
+        int total = candidateTotal > 0 ? candidateTotal : data.path("total").asInt();
+        Map<String, Object> merged = new LinkedHashMap<>();
+        merged.put("done", Math.min(data.path("done").asInt() + cachedHits, total));
+        merged.put("total", total);
+        merged.put("mode", data.path("mode").asText("RULE"));
+        return merged;
     }
 
     // ------------------------------------------------------------------ 落库
@@ -392,10 +498,13 @@ public class DecisionService {
         runMapper.updateById(update);
     }
 
-    private void markRunDone(String runId, long latencyMs, BigDecimal costYuan, int candidateCount) {
+    private void markRunDone(String runId, long latencyMs, BigDecimal costYuan, int candidateCount, String degradeLevel) {
+        boolean degraded = degradeLevel != null && !DEGRADE_NORMAL.equals(degradeLevel);
         DecisionRun update = new DecisionRun();
         update.setId(runId);
-        update.setStatus(STATUS_DONE);
+        // 有降级的 run 单独记为 DEGRADED，便于评测看板统计降级次数（技术方案 §7.3）
+        update.setStatus(degraded ? STATUS_DEGRADED : STATUS_DONE);
+        update.setDegradeLevel(degradeLevel == null ? DEGRADE_NORMAL : degradeLevel);
         update.setLatencyMs((int) latencyMs);
         update.setCostYuan(costYuan);
         update.setCandidateCount(candidateCount);

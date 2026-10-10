@@ -14,5 +14,6 @@ public record RunSnapshotResponse(
         int lastSeq,
         Integer latencyMs,
         java.math.BigDecimal costYuan,
-        String rubricVersion) {
+        String rubricVersion,
+        String degradeLevel) {
 }

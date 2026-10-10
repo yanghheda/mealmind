@@ -82,6 +82,17 @@ public class AppProperties {
         /** SSE 心跳间隔（秒）。 */
         private int heartbeatSeconds = 15;
 
+        /** 打分缓存 TTL（秒）：键含 rubric 版本与需求指纹，按菜品粒度复用（技术方案 §6.3）。 */
+        private long scoreCacheTtlSeconds = 600;
+
+        public long getScoreCacheTtlSeconds() {
+            return scoreCacheTtlSeconds;
+        }
+
+        public void setScoreCacheTtlSeconds(long scoreCacheTtlSeconds) {
+            this.scoreCacheTtlSeconds = scoreCacheTtlSeconds;
+        }
+
         public Map<String, BigDecimal> getWeights() {
             return weights;
         }
