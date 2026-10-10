@@ -171,6 +171,22 @@
   font-size: 13.5px;
   line-height: 1.5;
 }
+/* 降级横幅（技术方案 §6.1：PARTIAL / FULL 档） */
+.app--agent .degrade-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: #fff4e5;
+  border: 1px solid #ffd9a8;
+  color: #9a5b00;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.app--agent .degrade-banner svg {
+  flex: none;
+}
 .app--agent .ai-card {
   background: #fff;
   border-radius: 12px;

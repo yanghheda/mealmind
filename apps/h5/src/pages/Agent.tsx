@@ -235,7 +235,7 @@ function Welcome({
         <h2>想吃什么，说一句就行</h2>
         <p className="sub">口味、预算、忌口，交给 AI 帮你挑</p>
       </div>
-      <div className="welcome-note">试试下面的例子，或直接输入你的需求 · 当前为规则推荐模式</div>
+      <div className="welcome-note">试试下面的例子，或直接输入你的需求</div>
       <div className="sample-list">
         {SAMPLES.map((sample) => (
           <button className="sample" type="button" key={sample} onClick={() => onPick(sample)}>
@@ -270,6 +270,13 @@ function RunBlockView({
   return (
     <>
       <div className="bubble-user">{block.text}</div>
+
+      {block.degradeLevel === 'FULL' && (
+        <div className="degrade-banner">
+          <Icon name="circle-alert" size={14} />
+          <span>当前为规则推荐模式，结果可能不如智能推荐精准</span>
+        </div>
+      )}
 
       {block.profile && (
         <div className="ai-card">

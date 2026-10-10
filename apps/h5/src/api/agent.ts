@@ -76,6 +76,16 @@ export interface DoneEvent {
   costYuan: number
   rubricVersion: string
   relaxOptions: RelaxOption[]
+  degradeLevel: DegradeLevel
+}
+
+/** 降级档位（技术方案 §6.1）：NORMAL 无差异 / PARTIAL 部分规则分 / FULL 全规则分。 */
+export type DegradeLevel = 'NORMAL' | 'PARTIAL' | 'FULL'
+
+/** degraded 事件：档位发生迁移（NORMAL → PARTIAL / FULL，或恢复）。 */
+export interface DegradedEvent {
+  level: DegradeLevel
+  reason: string
 }
 
 export interface ErrorEvent {
@@ -94,6 +104,7 @@ export interface RunSnapshot {
   latencyMs: number | null
   costYuan: number | null
   rubricVersion: string
+  degradeLevel: DegradeLevel
 }
 
 export interface CreateRunRequest {

@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { createRun, fetchRunSnapshot, openRunStream } from '../api/agent'
 import type {
   DecisionCard,
+  DegradeLevel,
   DoneEvent,
   ErrorEvent,
   FilteredEvent,
@@ -28,6 +29,8 @@ export interface RunBlock {
   steps: ProgressStep[]
   profile: RunProfile | null
   fromFallback: boolean
+  /** 降级档位：NORMAL 无差异 / PARTIAL 部分卡片走规则分 / FULL 全部走规则分。 */
+  degradeLevel: DegradeLevel
   filtered: FilteredEvent | null
   scoring: ScoringEvent | null
   /** 打分阶段逐步到达；done 后替换为最终排序结果（带并列标记）。 */
@@ -134,6 +137,11 @@ export function useAgentSession(mode?: 'GLOBAL' | 'MERCHANT', merchantId?: strin
           }))
           break
         }
+        case 'degraded': {
+          const payload = data as { level: DegradeLevel; reason: string }
+          patch(blockId, (block) => ({ ...block, degradeLevel: payload.level }))
+          break
+        }
         case 'done': {
           const payload = data as DoneEvent
           patch(blockId, (block) => ({
@@ -142,6 +150,7 @@ export function useAgentSession(mode?: 'GLOBAL' | 'MERCHANT', merchantId?: strin
             cards: payload.cards,
             relaxOptions: payload.relaxOptions ?? [],
             latencyMs: payload.latencyMs,
+            degradeLevel: payload.degradeLevel ?? block.degradeLevel,
             steps: block.steps.map((step) => ({ ...step, status: 'done' as const })),
           }))
           break
@@ -171,13 +180,14 @@ export function useAgentSession(mode?: 'GLOBAL' | 'MERCHANT', merchantId?: strin
       if (phases.current.get(blockId) !== 'running') return
       try {
         const snapshot = await fetchRunSnapshot(runId)
-        if (snapshot.status === 'DONE') {
+        if (snapshot.status === 'DONE' || snapshot.status === 'DEGRADED') {
           patch(blockId, (block) => ({
             ...block,
             phase: 'done',
             profile: block.profile ?? snapshot.profile,
             cards: snapshot.cards,
             latencyMs: snapshot.latencyMs,
+            degradeLevel: snapshot.degradeLevel ?? block.degradeLevel,
             steps: block.steps.map((step) => ({ ...step, status: 'done' as const })),
           }))
         } else {
@@ -211,6 +221,7 @@ export function useAgentSession(mode?: 'GLOBAL' | 'MERCHANT', merchantId?: strin
         steps: initialSteps(),
         profile: null,
         fromFallback: false,
+        degradeLevel: 'NORMAL',
         filtered: null,
         scoring: null,
         cards: [],

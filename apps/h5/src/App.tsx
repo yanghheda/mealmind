@@ -6,6 +6,7 @@ import { Home } from './pages/Home'
 import { Merchant } from './pages/Merchant'
 import { Cart } from './pages/Cart'
 import { Agent } from './pages/Agent'
+import { Eval } from './pages/Eval'
 
 /** 路由表：封面 / 首页 / 商家详情 / 购物车 / AI 会话；其余路径回封面。 */
 function App() {
@@ -42,6 +43,14 @@ function App() {
           element={
             <RequireSession>
               <Agent />
+            </RequireSession>
+          }
+        />
+        <Route
+          path="/eval"
+          element={
+            <RequireSession>
+              <Eval />
             </RequireSession>
           }
         />
