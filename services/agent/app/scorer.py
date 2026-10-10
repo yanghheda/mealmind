@@ -6,9 +6,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
+from .config import settings
+from .degrade import DegradationController, degrade_controller
+from .jev import resolve_primary as resolve_jev
 from .models import Candidate, CandidateScore, DimScore, Profile
+
+logger = logging.getLogger("mealmind.agent.scorer")
 
 # 与 dish_tag SPICY 取值一致；「辣」是需求侧的泛辣度，匹配任一非不辣菜品
 _SPICY_LEVELS = {"不辣": 0, "微辣": 1, "中辣": 2, "特辣": 3}
@@ -148,3 +154,54 @@ class RuleScorer:
 
 
 scorer = RuleScorer()
+
+
+class ScorerRouter:
+    """通道选择与逐菜降级（技术方案 §6.2）。
+
+    主通道（Jev）可用时逐菜打分，单菜失败即回退规则分并计入本轮失败率，
+    失败率驱动 DegradationController 在 NORMAL / PARTIAL / FULL 三档间迁移。
+    RULE 模式或主通道未接入时始终走规则分，控制器停用、档位停在 NORMAL。
+    """
+
+    def __init__(self, primary, fallback, controller: DegradationController) -> None:
+        self._primary = primary
+        self._fallback = fallback
+        self._controller = controller
+
+    @property
+    def primary_mode(self) -> str | None:
+        return self._primary.mode if self._primary is not None else None
+
+    @property
+    def controller(self) -> DegradationController:
+        return self._controller
+
+    @property
+    def mode(self) -> str:
+        """当前轮次采用的主打通道标签（用于 scoring 事件）。"""
+
+        return self._primary.mode if self._use_primary() else self._fallback.mode
+
+    def score(self, candidate: Candidate, profile: Profile, context: ScoringContext) -> CandidateScore:
+        if self._use_primary():
+            try:
+                return self._primary.score(candidate, profile, context)
+            except Exception as exc:  # 单菜失败不影响整批：该菜走规则分
+                logger.warning("primary score failed, dishId=%s: %s", candidate.dishId, exc)
+        return self._fallback.score(candidate, profile, context)
+
+    def _use_primary(self) -> bool:
+        if self._primary is None or settings.scorer_mode == "RULE":
+            return False
+        return self._controller.should_attempt_primary()
+
+
+def resolve_primary():
+    """主通道 Scorer：配置了 Vercel AI Gateway key 时启用 Jev，否则整条链路走规则分。"""
+
+    return resolve_jev()
+
+
+router = ScorerRouter(resolve_primary(), scorer, degrade_controller)
+degrade_controller.set_channel_available("scorer", router.primary_mode is not None)

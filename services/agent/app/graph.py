@@ -16,10 +16,10 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from .config import settings
-from .models import Candidate, Profile
+from .models import Candidate, CandidateScore, Profile
 from .phraser import phraser
 from .runs import registry
-from .scorer import ScoringContext, scorer
+from .scorer import ScoringContext, router
 from .understander import understander
 
 _SCORE_BATCH_SIZE = settings.batch_size
@@ -34,19 +34,22 @@ class DecisionState(TypedDict, total=False):
     from_fallback: bool
     questions: list[str]
     candidates: list[Candidate] | None
+    scored: list[tuple[Candidate, CandidateScore]]
     reasons: list[dict[str, Any]]
 
 
 async def _understand(state: DecisionState) -> DecisionState:
     context = registry.get(state["run_id"])
-    profile = understander.parse(state["text"])
-    # M2 的理解通道即关键字规则（模型接入前的既定通道），fromFallback 恒为 True
+    # 模型通道是同步 HTTP，放到线程里执行，避免阻塞事件循环（超时 2s、重试 1 次）
+    result = await asyncio.to_thread(understander.parse, state["text"])
     if context:
         context.emit(
             "understand",
-            {"profile": profile.model_dump(), "questions": [], "fromFallback": True},
+            {"profile": result.profile.model_dump(), "questions": [], "fromFallback": result.from_fallback},
         )
-    return {"profile": profile, "from_fallback": True, "questions": []}
+        if result.transition:
+            context.emit("degraded", {"level": result.transition.to_level, "reason": result.transition.reason})
+    return {"profile": result.profile, "from_fallback": result.from_fallback, "questions": []}
 
 
 async def _filter(state: DecisionState) -> DecisionState:
@@ -84,35 +87,62 @@ async def _score(state: DecisionState) -> DecisionState:
     candidates = state.get("candidates") or []
     profile = state["profile"]
     total = len(candidates)
-    mode = scorer.mode
     if context:
-        context.emit("scoring", {"done": 0, "total": total, "mode": mode})
+        context.emit("scoring", {"done": 0, "total": total, "mode": router.mode})
 
     max_sales = max((c.dishMonthlySales for c in candidates), default=0)
     scoring_context = ScoringContext(max_dish_sales=max_sales)
-    reasons: list[dict[str, Any]] = []
+    scored: list[tuple[Candidate, CandidateScore]] = []
+    primary_mode = router.primary_mode
+    failed = 0
 
     for start in range(0, total, _SCORE_BATCH_SIZE):
         batch = candidates[start : start + _SCORE_BATCH_SIZE]
         results = await asyncio.gather(
-            *(asyncio.to_thread(scorer.score, candidate, profile, scoring_context) for candidate in batch)
+            *(asyncio.to_thread(router.score, candidate, profile, scoring_context) for candidate in batch)
         )
         for candidate, score in zip(batch, results):
-            reasons.append({"dishId": candidate.dishId, "reason": phraser.reason(candidate, score, profile)})
+            # 主通道模式下该菜回退到规则分：计入本轮失败率，驱动降级档位迁移
+            if primary_mode is not None and score.mode != primary_mode:
+                failed += 1
+            scored.append((candidate, score))
             if context:
                 context.emit("card", _card_payload(candidate, score))
         if context:
-            context.emit("scoring", {"done": min(start + _SCORE_BATCH_SIZE, total), "total": total, "mode": mode})
+            context.emit("scoring", {"done": min(start + _SCORE_BATCH_SIZE, total), "total": total, "mode": router.mode})
 
-    return {"reasons": reasons}
+    transition = router.controller.record_scoring(total, failed)
+    if transition and context:
+        context.emit("degraded", {"level": transition.to_level, "reason": transition.reason})
+
+    return {"scored": scored}
 
 
 async def _phrase(state: DecisionState) -> DecisionState:
+    """理由生成：按批并发调用表达器，逐条 push（生成式失败或校验不通过回落模板）。"""
+
     context = registry.get(state["run_id"])
-    if context:
-        for item in state.get("reasons") or []:
-            context.emit("reason.delta", {"dishId": item["dishId"], "text": item["reason"]})
-    return {}
+    profile = state["profile"]
+    scored = state.get("scored") or []
+    if not scored:
+        return {"reasons": []}
+
+    chunks = [scored[i : i + _SCORE_BATCH_SIZE] for i in range(0, len(scored), _SCORE_BATCH_SIZE)]
+    results = await asyncio.gather(
+        *(asyncio.to_thread(phraser.reasons, chunk, profile) for chunk in chunks)
+    )
+    by_dish: dict[str, str] = {}
+    for part in results:
+        by_dish.update(part)
+
+    reasons: list[dict[str, Any]] = []
+    for candidate, score in scored:
+        # PhraserRouter 保证每条候选都有理由（生成失败或校验不过即模板兜底）
+        text = by_dish[candidate.dishId]
+        reasons.append({"dishId": candidate.dishId, "reason": text})
+        if context:
+            context.emit("reason.delta", {"dishId": candidate.dishId, "text": text})
+    return {"reasons": reasons}
 
 
 def _card_payload(candidate: Candidate, score) -> dict[str, Any]:

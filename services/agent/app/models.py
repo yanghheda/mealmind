@@ -69,3 +69,32 @@ class CandidatesRequest(BaseModel):
     """业务服务执行约束过滤后的回填体（协作式编排：过滤节点由业务服务执行）。"""
 
     candidates: list[Candidate] = Field(default_factory=list)
+
+
+class ScoreRequest(BaseModel):
+    """POST /internal/score 请求体（评测用：业务服务直接提供候选，跳过 SSE 编排）。"""
+
+    text: str
+    candidates: list[Candidate] = Field(default_factory=list)
+    # 评测指标不依赖推荐理由，置 false 可跳过表达器，避免无谓的生成式模型调用
+    withReason: bool = True
+
+
+class ScoredCard(BaseModel):
+    """评测打分返回的逐菜结果（与 graph.py _card_payload 对齐，但包含理由）。"""
+
+    dishId: str
+    name: str
+    merchantId: str
+    merchantName: str
+    price: float
+    imageUrl: str | None = None
+    dims: list[DimScore]
+    conflictGuard: float
+    mode: str
+    reason: str
+
+
+class ScoreResponse(BaseModel):
+    profile: Profile
+    cards: list[ScoredCard]

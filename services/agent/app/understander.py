@@ -1,15 +1,23 @@
-"""关键字规则理解器（PRD 5.2 的兜底通道，M2 阶段即当前唯一通道）。
+"""需求理解器（PRD 5.2）：qwen3.8 模型通道 + 关键字规则兜底。
 
-词表与种子数据派生标签（deploy/sql/tools/seed_generate.py）保持同一套口径，
-保证「需求标签 ∩ 菜品标签」的命中判断在两端口径一致。
-生成式理解器接入后，本实现作为模型失败时的降级路径保留。
+两条通道输出同一个偏好结构，标签词表与种子数据（deploy/sql/20_seed.sql 的 dish_tag）
+保持同一口径，保证「需求标签 ∩ 菜品标签」的命中判断在两端口径一致。
+模型失败、超时或未配置密钥时降级为关键字规则解析（技术方案 §6.4）。
 """
 
 from __future__ import annotations
 
+import logging
 import re
 
+from dataclasses import dataclass
+
+from .config import settings
+from .degrade import Transition, degrade_controller
+from .llm import QwenClient
 from .models import Profile
+
+logger = logging.getLogger("mealmind.agent.understander")
 
 # 辣度：与 dish_tag SPICY 取值一致，另保留「辣」表示不限辣度
 _SPICY_NONE = ("不辣", "不吃辣", "不要辣", "别辣", "不能吃辣")
@@ -31,6 +39,7 @@ _FLAVOR_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("甜口", ("甜的", "甜口", "甜一点")),
     ("清淡", ("清淡", "清汤", "水煮", "清爽", "少油", "不油腻")),
     ("麻酱", ("麻酱", "芝麻酱")),
+    ("咸鲜", ("咸鲜", "鲜咸", "咸口")),
 ]
 
 # 健康诉求：映射到 dish_tag HEALTH 的正向标签
@@ -208,4 +217,125 @@ class KeywordUnderstander:
         return "夜宵"
 
 
-understander = KeywordUnderstander()
+# -- 标签词表：模型输出必须落在这个闭集内，否则与菜品标签对不上 ---------------
+
+_TASTE_VOCAB: tuple[str, ...] = (
+    ("不辣", "微辣", "中辣", "特辣", "辣")
+    + tuple(tag for tag, _ in _FLAVOR_KEYWORDS)
+    + tuple(tag for tag, _ in _HEALTH_KEYWORDS)
+)
+_AVOID_VOCAB: tuple[str, ...] = tuple(tag for tag, _ in _AVOID_KEYWORDS)
+_SCENE_VOCAB: tuple[str, ...] = tuple(tag for tag, _ in _SCENE_KEYWORDS)
+_MEAL_VOCAB: tuple[str, ...] = tuple(tag for tag, _ in _MEAL_KEYWORDS)
+
+# 项目全部已知标签：表达器据此校验「理由是否引用了未给出的标签」
+KNOWN_TAGS: frozenset[str] = frozenset(_TASTE_VOCAB + _AVOID_VOCAB)
+
+_SYSTEM_PROMPT = (
+    "你是外卖需求解析器。把用户的一句话需求解析为 JSON 对象，字段如下：\n"
+    f"- taste_tags：口味标签数组，只能从这些值里选：{'、'.join(_TASTE_VOCAB)}\n"
+    "- budget_max：预算上限（数字，单位元），未提到填 null\n"
+    f"- avoid_ingredients：忌口食材数组，只能从这些值里选：{'、'.join(_AVOID_VOCAB)}\n"
+    "- max_delivery_min：期望最长送达时间（整数分钟），未提到填 null\n"
+    f"- scene：场景，只能是其中之一：{'、'.join(_SCENE_VOCAB)}，没有则填 null\n"
+    f"- meal_period：餐段，只能是其中之一：{'、'.join(_MEAL_VOCAB)}，未提到则填 null\n"
+    "只输出 JSON，不要解释、不要 Markdown 代码块。"
+)
+
+
+class QwenUnderstander:
+    """qwen3.8 理解器：模型输出经词表校验与类型归一化后回填 Profile。"""
+
+    def __init__(self, client: QwenClient) -> None:
+        self._client = client
+
+    def parse(self, text: str) -> Profile:
+        data = self._client.chat_json(_SYSTEM_PROMPT, text)
+        taste = [t for t in _as_list(data.get("taste_tags")) if t in _TASTE_VOCAB]
+        avoid = [t for t in _as_list(data.get("avoid_ingredients")) if t in _AVOID_VOCAB]
+        scene = data.get("scene") if data.get("scene") in _SCENE_VOCAB else None
+        meal = data.get("meal_period") if data.get("meal_period") in _MEAL_VOCAB else None
+        if meal is None:
+            # 与规则通道口径一致：未提及餐段时按当前时段推断
+            meal = KeywordUnderstander._meal_period(text)
+        return Profile(
+            taste_tags=list(dict.fromkeys(taste))[:5],
+            budget_max=_as_number(data.get("budget_max"), 1, 200),
+            avoid_ingredients=list(dict.fromkeys(avoid)),
+            max_delivery_min=_as_int(data.get("max_delivery_min"), 5, 120),
+            scene=scene,
+            meal_period=meal,
+            notes=text.strip()[:100],
+            open_questions=[],
+        )
+
+
+@dataclass(frozen=True)
+class UnderstandResult:
+    """一次理解的结果：偏好结构 + 是否走了兜底 + 档位迁移（有则上报 degraded）。"""
+
+    profile: Profile
+    from_fallback: bool
+    transition: Transition | None = None
+
+
+class UnderstanderRouter:
+    """按通道选择理解实现：模型可用且未降级时走模型，否则走关键字规则。"""
+
+    def __init__(self, primary: QwenUnderstander | None,
+                 fallback: KeywordUnderstander) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    @property
+    def primary_enabled(self) -> bool:
+        return self._primary is not None
+
+    def parse(self, text: str) -> UnderstandResult:
+        if self._primary is None:
+            return UnderstandResult(self._fallback.parse(text), True)
+        try:
+            profile = self._primary.parse(text)
+            return UnderstandResult(profile, False, degrade_controller.record_understand(True))
+        except Exception as exc:  # 超时 / 网络 / 非 200 / 输出不合法：整体降级
+            logger.warning("primary understander failed, fallback to rules: %s", exc)
+            transition = degrade_controller.record_understand(False)
+            return UnderstandResult(self._fallback.parse(text), True, transition)
+
+
+def _as_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _as_number(value: object, low: float, high: float) -> float | None:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return number if low <= number <= high else None
+
+
+def _as_int(value: object, low: int, high: int) -> int | None:
+    number = _as_number(value, low, high)
+    return int(number) if number is not None else None
+
+
+_client = QwenClient(
+    api_key=settings.dashscope_api_key,
+    base_url=settings.qwen_base_url,
+    model=settings.qwen_model,
+    timeout_s=settings.understand_timeout_s,
+    enable_thinking=False,
+)
+
+
+def resolve_primary_understander() -> QwenUnderstander | None:
+    """未配置百炼密钥时返回 None，链路直接走关键字规则通道（M2 基线）。"""
+
+    return QwenUnderstander(_client) if _client.configured else None
+
+
+understander = UnderstanderRouter(resolve_primary_understander(), KeywordUnderstander())
+degrade_controller.set_channel_available("understander", understander.primary_enabled)

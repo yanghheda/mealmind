@@ -18,8 +18,11 @@ from fastapi.responses import StreamingResponse
 
 from .config import settings
 from .graph import decision_graph
-from .models import CandidatesRequest, DecideRequest
+from .models import Candidate, CandidateScore, CandidatesRequest, DecideRequest, ScoreRequest, ScoreResponse, ScoredCard
+from .phraser import phraser, template_phraser
 from .runs import registry
+from .scorer import ScoringContext, router
+from .understander import understander
 
 logger = logging.getLogger("mealmind.agent")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -117,3 +120,56 @@ def provide_candidates(run_id: str, request: CandidatesRequest) -> dict:
     context.candidates_ready.set()
     logger.info("candidates provided, runId=%s count=%d", run_id, len(request.candidates))
     return {"accepted": len(request.candidates)}
+
+
+@app.post("/internal/score", dependencies=[Depends(verify_internal_token)])
+async def score(request: ScoreRequest) -> ScoreResponse:
+    """评测打分端点：业务服务直接提供候选，复用 understander + scorer + phraser，不走 SSE 编排。"""
+
+    result = await asyncio.to_thread(understander.parse, request.text)
+    profile = result.profile
+    candidates = request.candidates
+    max_sales = max((c.dishMonthlySales for c in candidates), default=0)
+    scoring_context = ScoringContext(max_dish_sales=max_sales)
+
+    # 与生产图 _score 节点同一口径：按批并发打分（Jev 单次约 1.3s，串行 20 道要 26s）
+    scores: list[tuple[Candidate, CandidateScore]] = []
+    for start in range(0, len(candidates), settings.batch_size):
+        batch = candidates[start : start + settings.batch_size]
+        batch_scores = await asyncio.gather(
+            *(asyncio.to_thread(router.score, candidate, profile, scoring_context) for candidate in batch)
+        )
+        scores.extend(zip(batch, batch_scores))
+    # 理由生成同样按批并发，评测与线上走同一通道（含事实校验与模板兜底）
+    if request.withReason:
+        chunks = [scores[i : i + settings.batch_size] for i in range(0, len(scores), settings.batch_size)]
+        parts = await asyncio.gather(*(asyncio.to_thread(phraser.reasons, chunk, profile) for chunk in chunks))
+        reasons: dict[str, str] = {}
+        for part in parts:
+            reasons.update(part)
+    else:
+        # 评测指标不依赖理由：走模板通道，省掉整轮表达器调用
+        reasons = {
+            candidate.dishId: template_phraser.reason(candidate, score, profile)
+            for candidate, score in scores
+        }
+
+    cards: list[ScoredCard] = []
+    for candidate, candidate_score in scores:
+        cards.append(
+            ScoredCard(
+                dishId=candidate.dishId,
+                name=candidate.name,
+                merchantId=candidate.merchantId,
+                merchantName=candidate.merchantName,
+                price=candidate.price,
+                imageUrl=candidate.imageUrl,
+                dims=candidate_score.dims,
+                conflictGuard=candidate_score.conflictGuard,
+                mode=candidate_score.mode,
+                reason=reasons[candidate.dishId],
+            )
+        )
+    logger.info("score request processed, candidates=%d mode=%s fromFallback=%s",
+                len(candidates), router.mode, result.from_fallback)
+    return ScoreResponse(profile=profile, cards=cards)
