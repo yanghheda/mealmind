@@ -16,6 +16,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from .config import settings
+from .degrade import DegradeLevel
 from .models import Candidate, CandidateScore, Profile
 from .phraser import phraser
 from .runs import registry
@@ -94,6 +95,9 @@ async def _score(state: DecisionState) -> DecisionState:
     scoring_context = ScoringContext(max_dish_sales=max_sales)
     scored: list[tuple[Candidate, CandidateScore]] = []
     primary_mode = router.primary_mode
+    # FULL 档冷却期内不发探测（整轮走规则分）：这一轮既不算失败也不写回控制器。
+    # 否则每轮都会因 mode≠primary 被判为「探测失败」而重置冷却——持续流量下永远无法自动恢复。
+    attempted = primary_mode is not None and router.controller.should_attempt_primary()
     failed = 0
 
     for start in range(0, total, _SCORE_BATCH_SIZE):
@@ -103,7 +107,7 @@ async def _score(state: DecisionState) -> DecisionState:
         )
         for candidate, score in zip(batch, results):
             # 主通道模式下该菜回退到规则分：计入本轮失败率，驱动降级档位迁移
-            if primary_mode is not None and score.mode != primary_mode:
+            if attempted and score.mode != primary_mode:
                 failed += 1
             scored.append((candidate, score))
             if context:
@@ -111,9 +115,14 @@ async def _score(state: DecisionState) -> DecisionState:
         if context:
             context.emit("scoring", {"done": min(start + _SCORE_BATCH_SIZE, total), "total": total, "mode": router.mode})
 
-    transition = router.controller.record_scoring(total, failed)
-    if transition and context:
-        context.emit("degraded", {"level": transition.to_level, "reason": transition.reason})
+    transition = router.controller.record_scoring(total, failed) if attempted else None
+    if context:
+        if transition:
+            context.emit("degraded", {"level": transition.to_level, "reason": transition.reason})
+        elif router.controller.level != DegradeLevel.NORMAL:
+            # 无迁移但本轮仍处于降级档：同步当前档位，业务服务据此把本轮 run 记为降级
+            context.emit("degraded",
+                         {"level": router.controller.level, "reason": "维持降级档位"})
 
     return {"scored": scored}
 

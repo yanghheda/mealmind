@@ -82,7 +82,7 @@ export interface DoneEvent {
 /** 降级档位（技术方案 §6.1）：NORMAL 无差异 / PARTIAL 部分规则分 / FULL 全规则分。 */
 export type DegradeLevel = 'NORMAL' | 'PARTIAL' | 'FULL'
 
-/** degraded 事件：档位发生迁移（NORMAL → PARTIAL / FULL，或恢复）。 */
+/** degraded 事件：档位发生迁移（NORMAL → PARTIAL / FULL，或恢复），或本轮维持降级档位时的状态同步。 */
 export interface DegradedEvent {
   level: DegradeLevel
   reason: string
