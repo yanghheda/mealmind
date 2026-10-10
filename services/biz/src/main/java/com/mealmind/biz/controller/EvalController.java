@@ -49,11 +49,12 @@ public class EvalController {
         this.goldenCaseMapper = goldenCaseMapper;
     }
 
-    /** 触发一次评测批次；limit 用于小样本抽样（等距取，覆盖三类用例）。 */
+    /** 触发一次评测批次；limit 用于小样本抽样（等距取，覆盖三类用例），repeat 为稳定性复跑次数。 */
     @PostMapping("/batches")
     public ApiResponse<EvalBatch> runBatch(@RequestParam(required = false) String triggeredBy,
-                                          @RequestParam(required = false) Integer limit) {
-        return ApiResponse.ok(evalService.runBatch(triggeredBy, limit));
+                                          @RequestParam(required = false) Integer limit,
+                                          @RequestParam(required = false) Integer repeat) {
+        return ApiResponse.ok(evalService.runBatch(triggeredBy, limit, repeat));
     }
 
     /** 批次列表（最新在前）。 */

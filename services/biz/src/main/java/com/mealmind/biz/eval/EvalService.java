@@ -4,9 +4,11 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -81,8 +83,13 @@ public class EvalService {
         this.objectMapper = objectMapper;
     }
 
-    /** 触发一次评测批次；limit 非空时等距抽样（同步执行，50 条用例约几分钟）。 */
-    public EvalBatch runBatch(String triggeredBy, Integer limit) {
+    /**
+     * 触发一次评测批次；limit 非空时等距抽样（同步执行，50 条用例约几分钟）。
+     * repeat 为同一用例重复执行的次数（稳定性复跑，默认 1）：重复轮全部通过才算个案通过，
+     * 并额外写入 stability_* 三项指标，用于衡量模型输出的波动。
+     */
+    public EvalBatch runBatch(String triggeredBy, Integer limit, Integer repeat) {
+        int runs = (repeat == null || repeat < 1) ? 1 : repeat;
         List<GoldenCase> cases = goldenCaseMapper.selectList(
                 new QueryWrapper<GoldenCase>().orderByAsc("created_at").orderByAsc("id"));
         if (cases.isEmpty()) {
@@ -111,32 +118,82 @@ public class EvalService {
         int emptyPass = 0;
         int top1TastePass = 0;
         List<Long> latencies = new ArrayList<>();
+        // 稳定性口径（repeat > 1 时）
+        int runPassed = 0;
+        int runTotal = 0;
+        int stabilityCases = 0;
+        int top1ConsistPass = 0;
+        BigDecimal dimRangeMax = BigDecimal.ZERO;
 
         for (GoldenCase gc : cases) {
-            CaseResult cr = runCase(gc);
+            List<CaseResult> repeats = new ArrayList<>(runs);
+            for (int i = 0; i < runs; i++) {
+                repeats.add(runCase(gc));
+            }
+            for (CaseResult r : repeats) {
+                runTotal++;
+                if (r.passed) runPassed++;
+                latencies.add(r.latencyMs);
+            }
+
+            // 个案口径：任意一轮失败即判失败，失败详情取第一轮的失败快照
+            CaseResult first = repeats.get(0);
+            CaseResult firstFail = repeats.stream().filter(r -> !r.passed).findFirst().orElse(null);
+            boolean passed = firstFail == null;
+            boolean hardOk = repeats.stream().allMatch(CaseResult::hardOk);
+            boolean understandOk = repeats.stream().allMatch(CaseResult::understandOk);
+            boolean sufficientOk = repeats.stream().allMatch(CaseResult::sufficientOk);
+            boolean top1TasteOk = repeats.stream().allMatch(CaseResult::top1TasteOk);
+            boolean expectEmpty = first.expectEmpty;
+            String failCategory = passed ? null : firstFail.failCategory;
+            String failDetail = passed ? null : firstFail.failDetail;
+
             EvalResult er = new EvalResult();
             er.setBatchId(batchId);
             er.setCaseId(gc.getId());
-            er.setPassed(cr.passed ? 1 : 0);
-            er.setFailDetailJson(cr.failDetail);
+            er.setPassed(passed ? 1 : 0);
+            er.setFailDetailJson(failDetail);
             evalResultMapper.insert(er);
 
-            if (cr.hardOk) hardPass++;
-            if (cr.understandOk) understandPass++;
-            if (cr.sufficientOk) sufficientPass++;
-            if (cr.expectEmpty) {
+            if (hardOk) hardPass++;
+            if (understandOk) understandPass++;
+            if (sufficientOk) sufficientPass++;
+            if (expectEmpty) {
                 emptyCases++;
-                if (cr.sufficientOk) emptyPass++;
-            } else if (cr.top1TasteOk) {
+                if (sufficientOk) emptyPass++;
+            } else if (top1TasteOk) {
                 top1TastePass++;
             }
-            latencies.add(cr.latencyMs);
 
-            if (!cr.passed) {
+            // 稳定性：Top1 菜品各轮是否一致；Top1 各维度分的跨轮极差（0–10 尺度）
+            if (runs > 1 && !expectEmpty) {
+                stabilityCases++;
+                String top1 = first.top1DishId;
+                if (repeats.stream().allMatch(r -> Objects.equals(r.top1DishId, top1))) {
+                    top1ConsistPass++;
+                }
+            }
+            if (runs > 1) {
+                Map<String, List<BigDecimal>> byDim = new LinkedHashMap<>();
+                for (CaseResult r : repeats) {
+                    for (DimView d : r.top1Dims) {
+                        byDim.computeIfAbsent(d.dim(), k -> new ArrayList<>()).add(d.value());
+                    }
+                }
+                for (List<BigDecimal> values : byDim.values()) {
+                    BigDecimal range = values.stream().max(Comparator.naturalOrder()).orElse(BigDecimal.ZERO)
+                            .subtract(values.stream().min(Comparator.naturalOrder()).orElse(BigDecimal.ZERO));
+                    if (range.compareTo(dimRangeMax) > 0) {
+                        dimRangeMax = range;
+                    }
+                }
+            }
+
+            if (!passed) {
                 Badcase bc = new Badcase();
                 bc.setCaseId(gc.getId());
-                bc.setCategory(cr.failCategory);
-                bc.setDetailJson(cr.failDetail);
+                bc.setCategory(failCategory);
+                bc.setDetailJson(failDetail);
                 bc.setStatus("OPEN");
                 bc.setCreatedAt(LocalDateTime.now());
                 badcaseMapper.insert(bc);
@@ -151,11 +208,17 @@ public class EvalService {
         writeMetric(batchId, "empty_correctness", pct(emptyPass, emptyCases), emptyCases);
         writeMetric(batchId, "top1_taste_match", pct(top1TastePass, nonEmpty), nonEmpty);
         writeMetric(batchId, "latency_p95_ms", BigDecimal.valueOf(p95(latencies)), total);
+        if (runs > 1) {
+            // 「0.5 档」口径：4 档 rubric 上 1 档 = 10/3 分，0.5 档 ≈ 1.67 分（PRD 7.5）
+            writeMetric(batchId, "stability_top1_consistency", pct(top1ConsistPass, stabilityCases), stabilityCases);
+            writeMetric(batchId, "stability_dim_range_max", dimRangeMax.setScale(2, RoundingMode.HALF_UP), total);
+            writeMetric(batchId, "stability_pass_rate", pct(runPassed, runTotal), runTotal);
+        }
 
         batch.setStatus("DONE");
         batch.setFinishedAt(LocalDateTime.now());
         evalBatchMapper.updateById(batch);
-        log.info("eval batch {} done, total={}", batchId, total);
+        log.info("eval batch {} done, total={}, repeat={}", batchId, total, runs);
         return batch;
     }
 
@@ -229,7 +292,9 @@ public class EvalService {
         String failDetail = passed ? null : buildFailDetail(gc, expected, ranked, result.profile(), failCategory);
 
         return new CaseResult(passed, hardOk, understandOk, sufficientOk, top1TasteOk,
-                expectEmpty, failCategory, failDetail, latency);
+                expectEmpty, failCategory, failDetail, latency,
+                ranked.isEmpty() ? null : ranked.get(0).dishId(),
+                ranked.isEmpty() ? List.of() : ranked.get(0).dims());
     }
 
     /** Agent 回显的卡片 → 业务侧排序输入（只取 dishId / dims / mode）。 */
@@ -391,11 +456,12 @@ public class EvalService {
 
     private record CaseResult(boolean passed, boolean hardOk, boolean understandOk,
                               boolean sufficientOk, boolean top1TasteOk, boolean expectEmpty,
-                              String failCategory, String failDetail, long latencyMs) {
+                              String failCategory, String failDetail, long latencyMs,
+                              String top1DishId, List<DimView> top1Dims) {
 
         static CaseResult fail(String caseId, String category, String message) {
             return new CaseResult(false, false, false, false, false, false,
-                    category, "{\"error\":\"" + message + "\"}", 0);
+                    category, "{\"error\":\"" + message + "\"}", 0, null, List.of());
         }
     }
 }
