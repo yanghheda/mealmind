@@ -64,6 +64,24 @@ services:
     logging: *default-logging
     environment:
       INTERNAL_TOKEN: ${MEALMIND_INTERNAL_TOKEN}
+      # 打分通道：AUTO 优先 Jev、失败自动降级规则；RULE 强制规则；JEV 强制 Jev
+      SCORER_MODE: ${SCORER_MODE:-AUTO}
+      # Jev 经 TeamoRouter 调用（技术方案 §2 选型）
+      JEV_API_KEY: ${JEV_API_KEY}
+      JEV_BASE_URL: ${JEV_BASE_URL:-https://api.teamorouter.com/v1}
+      JEV_MODEL: ${JEV_MODEL:-jev}
+      # 出网代理：本地直连不通时用（生产可留空）
+      JEV_PROXY_URL: ${JEV_PROXY_URL:-}
+      # 生成式模型（理解与表达）：阿里云百炼 qwen3.8
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      QWEN_BASE_URL: ${QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      QWEN_MODEL: ${QWEN_MODEL:-qwen3.8-flash}
+      # 降级状态机阈值（技术方案 §6.1）
+      DEGRADE_PARTIAL_THRESHOLD: ${DEGRADE_PARTIAL_THRESHOLD:-0.3}
+      DEGRADE_COOLDOWN_SECONDS: ${DEGRADE_COOLDOWN_SECONDS:-60}
+      # 模型调用超时（秒，技术方案 §6.4）
+      UNDERSTAND_TIMEOUT_S: ${UNDERSTAND_TIMEOUT_S:-3}
+      PHRASE_TIMEOUT_S: ${PHRASE_TIMEOUT_S:-4}
     healthcheck:
       test:
         - CMD
