@@ -15,6 +15,12 @@ services:
     image: mealmind-api:local
     build:
       context: ../services/biz
+    environment:
+      # 仅本地开发：Jev 经系统 SOCKS 代理比生产直连慢（实测整轮 ~14s），放宽整轮超时便于验证；生产保持默认 12s
+      RUN_TIMEOUT_MS: "30000"
+    # 仅本地开发：暴露到回环地址，供 h5 dev server 的 /api 代理（vite.config.ts → 127.0.0.1:8080）直连
+    ports:
+      - "127.0.0.1:8080:8080"
 
   mealmind-agent:
     image: mealmind-agent:local
