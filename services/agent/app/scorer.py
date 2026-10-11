@@ -7,12 +7,13 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .config import settings
 from .degrade import DegradationController, degrade_controller
 from .jev import resolve_primary as resolve_jev
 from .models import Candidate, CandidateScore, DimScore, Profile
+from .runs import RunUsage
 
 logger = logging.getLogger("mealmind.agent.scorer")
 
@@ -33,11 +34,15 @@ _SCENE_RULES = {
 DIM_NAMES = ("taste", "budget", "timeliness", "reputation", "scene")
 
 
-@dataclass(frozen=True)
+@dataclass
 class ScoringContext:
-    """一次打分批次内的上下文（口碑维度的月售归一化需要批内最大值）。"""
+    """一次打分批次内的上下文（口碑维度的月售归一化需要批内最大值）。
+
+    M4 W5：去 frozen 并携带可变 usage，JevScorer 借它累加调用次数。
+    """
 
     max_dish_sales: int
+    usage: RunUsage = field(default_factory=RunUsage)
 
 
 class RuleScorer:

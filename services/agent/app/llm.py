@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -17,6 +18,29 @@ logger = logging.getLogger("mealmind.agent.llm")
 
 class ModelError(RuntimeError):
     """模型调用失败（超时 / 网络 / 非 200 / 无 JSON），交由调用方降级。"""
+
+
+@dataclass(frozen=True)
+class LlmUsage:
+    """一次模型调用的 token 用量（M4 W5 成本计量）。
+
+    优先取响应里的真实 usage；缺失时按字符数估算（1 汉字≈1 token）并标记 estimated。
+    """
+
+    input_tokens: int
+    output_tokens: int
+    estimated: bool
+
+
+@dataclass(frozen=True)
+class LlmResult:
+    """一次 JSON 补全的结果：解析后的对象 + 用量。
+
+    客户端是模块级单例且可能多线程并发，usage 只能随返回值传递，不能挂实例。
+    """
+
+    data: dict[str, Any]
+    usage: LlmUsage
 
 
 class QwenClient:
@@ -38,7 +62,7 @@ class QwenClient:
     def configured(self) -> bool:
         return bool(self._api_key)
 
-    def chat_json(self, system: str, user: str) -> dict[str, Any]:
+    def chat_json(self, system: str, user: str) -> LlmResult:
         """一次 JSON 输出补全；超时默认 3s、失败重试 1 次（技术方案 §6.4）。"""
 
         payload = {
@@ -62,13 +86,30 @@ class QwenClient:
                     )
                 if response.status_code != 200:
                     raise ModelError(f"qwen returned {response.status_code}: {response.text[:200]}")
-                content = response.json()["choices"][0]["message"]["content"]
-                return _extract_json(content)
+                body = response.json()
+                content = body["choices"][0]["message"]["content"]
+                data = _extract_json(content)
+                return LlmResult(data=data, usage=_usage_of(body, system, user, content))
             except Exception as exc:  # 网络 / 超时 / 解析失败统一走降级
                 last_error = exc
                 logger.warning("qwen call failed (attempt %d/%d): %s",
                                attempt + 1, self._retries + 1, exc)
         raise ModelError(str(last_error))
+
+
+def _usage_of(body: dict[str, Any], system: str, user: str, content: str) -> LlmUsage:
+    """优先取响应 usage；缺失时按字符数估算（1 汉字≈1 token）。"""
+
+    usage = body.get("usage") or {}
+    input_tokens = usage.get("prompt_tokens")
+    output_tokens = usage.get("completion_tokens")
+    if isinstance(input_tokens, int) and isinstance(output_tokens, int):
+        return LlmUsage(input_tokens=input_tokens, output_tokens=output_tokens, estimated=False)
+    return LlmUsage(
+        input_tokens=len(system) + len(user),
+        output_tokens=len(content),
+        estimated=True,
+    )
 
 
 def _extract_json(content: str) -> dict[str, Any]:

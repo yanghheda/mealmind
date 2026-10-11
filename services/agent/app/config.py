@@ -26,6 +26,8 @@ class Settings:
     rubric_version: str
     # 候选回填（业务服务执行约束过滤）的等待超时
     continuation_timeout_s: float
+    # 澄清提问等待用户回答的最长时长（秒）；超时按跳过处理（M4 W2）
+    clarify_timeout_s: float
     # 打分批次大小，与 §8.5 scorer.batch-size 对齐
     batch_size: int
     # Jev 直连 TypeSafe 官方 API
@@ -50,6 +52,10 @@ class Settings:
     phrase_timeout_s: float
     # Jev 单菜打分超时（秒）；实测中位 1.2s、上限 2.1s，取 3s 留余量
     jev_timeout_s: float
+    # Jev 单次调用的实测 token 载荷（PRD §5.8：1018 入 / 90 出，输出免费）；
+    # 仅用于 _usage 节点的折算日志，计价走「按次」而非逐次采 token
+    jev_tokens_in: int
+    jev_tokens_out: int
     # Jev 出网代理（本地开发需经系统 SOCKS 代理才能到达该域名；生产可留空）
     jev_proxy_url: str
 
@@ -59,6 +65,7 @@ settings = Settings(
     scorer_mode=os.getenv("SCORER_MODE", "AUTO").upper(),
     rubric_version=os.getenv("RUBRIC_VERSION", "v1.2"),
     continuation_timeout_s=_float("CONTINUATION_TIMEOUT_S", 5.0),
+    clarify_timeout_s=_float("CLARIFY_TIMEOUT_S", 60.0),
     batch_size=_int("SCORER_BATCH_SIZE", 5),
     jev_api_key=os.getenv("JEV_API_KEY", ""),
     jev_base_url=os.getenv("JEV_BASE_URL", "https://api.teamorouter.com/v1"),
@@ -73,5 +80,7 @@ settings = Settings(
     understand_timeout_s=_float("UNDERSTAND_TIMEOUT_S", 3.0),
     phrase_timeout_s=_float("PHRASE_TIMEOUT_S", 4.0),
     jev_timeout_s=_float("JEV_TIMEOUT_S", 3.0),
+    jev_tokens_in=_int("JEV_TOKENS_IN", 1018),
+    jev_tokens_out=_int("JEV_TOKENS_OUT", 90),
     jev_proxy_url=os.getenv("JEV_PROXY_URL", ""),
 )

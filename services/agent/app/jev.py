@@ -160,6 +160,8 @@ class JevScorer:
             }
 
         answers = self._client.evaluate(_state(candidate, profile), questions).get("answers", {})
+        # 成本计量（M4 W5）：一次成功的 Jev 调用（token 按 PRD §5.8 实测常量折算，不逐次采集）
+        context.usage.count_jev_call()
         dims = [self._to_dim(dim, answers.get(dim)) for dim in DIM_NAMES]
         guard = 0.0
         if avoid:

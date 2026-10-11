@@ -71,6 +71,21 @@ class CandidatesRequest(BaseModel):
     candidates: list[Candidate] = Field(default_factory=list)
 
 
+class ClarifyAnswer(BaseModel):
+    """单条澄清回答：optionId 为 null 表示跳过该问题。"""
+
+    questionId: str
+    optionId: str | None = None
+
+
+class AnswersRequest(BaseModel):
+    """POST /internal/decide/{runId}/answers 请求体（M4 W2 澄清回答）。"""
+
+    answers: list[ClarifyAnswer] = Field(default_factory=list)
+    # 一键跳过整轮追问（skipped=true 时忽略 answers）
+    skipped: bool = False
+
+
 class ScoreRequest(BaseModel):
     """POST /internal/score 请求体（评测用：业务服务直接提供候选，跳过 SSE 编排）。"""
 

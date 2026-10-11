@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -18,7 +19,16 @@ from fastapi.responses import StreamingResponse
 
 from .config import settings
 from .graph import decision_graph
-from .models import Candidate, CandidateScore, CandidatesRequest, DecideRequest, ScoreRequest, ScoreResponse, ScoredCard
+from .models import (
+    AnswersRequest,
+    Candidate,
+    CandidateScore,
+    CandidatesRequest,
+    DecideRequest,
+    ScoreRequest,
+    ScoreResponse,
+    ScoredCard,
+)
 from .phraser import phraser, template_phraser
 from .runs import registry
 from .scorer import ScoringContext, router
@@ -117,9 +127,28 @@ def provide_candidates(run_id: str, request: CandidatesRequest) -> dict:
     if context is None or context.closed:
         raise HTTPException(status_code=404, detail="run not found or finished")
     context.candidates = request.candidates
+    context.last_activity = time.monotonic()
     context.candidates_ready.set()
     logger.info("candidates provided, runId=%s count=%d", run_id, len(request.candidates))
     return {"accepted": len(request.candidates)}
+
+
+@app.post("/internal/decide/{run_id}/answers", dependencies=[Depends(verify_internal_token)])
+def provide_answers(run_id: str, request: AnswersRequest) -> dict:
+    """澄清回答（M4 W2）：把用户选择回填给暂停在澄清节点的图；不处于等待态时返回 409。"""
+
+    context = registry.get(run_id)
+    if context is None or context.closed:
+        raise HTTPException(status_code=404, detail="run not found or finished")
+    if not context.clarify_pending:
+        raise HTTPException(status_code=409, detail="clarify not pending")
+    context.answers = [answer.model_dump() for answer in request.answers]
+    context.answers_skipped = request.skipped
+    context.last_activity = time.monotonic()
+    context.answers_ready.set()
+    logger.info("clarify answers provided, runId=%s skipped=%s count=%d",
+                run_id, request.skipped, len(request.answers))
+    return {"accepted": True}
 
 
 @app.post("/internal/score", dependencies=[Depends(verify_internal_token)])
@@ -145,7 +174,7 @@ async def score(request: ScoreRequest) -> ScoreResponse:
         chunks = [scores[i : i + settings.batch_size] for i in range(0, len(scores), settings.batch_size)]
         parts = await asyncio.gather(*(asyncio.to_thread(phraser.reasons, chunk, profile) for chunk in chunks))
         reasons: dict[str, str] = {}
-        for part in parts:
+        for part, _usage in parts:  # 评测成本不进 cost_yuan（只统计真实决策），用量在此丢弃
             reasons.update(part)
     else:
         # 评测指标不依赖理由：走模板通道，省掉整轮表达器调用

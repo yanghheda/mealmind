@@ -14,7 +14,7 @@ import logging
 import re
 
 from .config import settings
-from .llm import QwenClient
+from .llm import LlmUsage, QwenClient
 from .models import Candidate, CandidateScore, Profile
 
 logger = logging.getLogger("mealmind.agent.phraser")
@@ -76,15 +76,16 @@ class QwenPhraser:
     def __init__(self, client: QwenClient) -> None:
         self._client = client
 
-    def reasons(self, items: list[tuple[Candidate, CandidateScore]], profile: Profile) -> dict[str, str]:
+    def reasons(self, items: list[tuple[Candidate, CandidateScore]], profile: Profile) -> tuple[dict[str, str], LlmUsage]:
         if not items:
-            return {}
-        data = self._client.chat_json(_SYSTEM_PROMPT, _user_prompt(items, profile))
+            return {}, LlmUsage(input_tokens=0, output_tokens=0, estimated=False)
+        result = self._client.chat_json(_SYSTEM_PROMPT, _user_prompt(items, profile))
+        data = result.data
         raw = data.get("reasons")
         if not isinstance(raw, dict):
             raise ValueError("phraser output missing reasons object")
 
-        result: dict[str, str] = {}
+        reasons: dict[str, str] = {}
         for candidate, score in items:
             text = raw.get(candidate.dishId)
             if not isinstance(text, str):
@@ -94,8 +95,8 @@ class QwenPhraser:
             if violation:
                 logger.warning("reason rejected, dishId=%s, reason=%s", candidate.dishId, violation)
                 continue
-            result[candidate.dishId] = cleaned
-        return result
+            reasons[candidate.dishId] = cleaned
+        return reasons, result.usage
 
 
 class PhraserRouter:
@@ -108,11 +109,13 @@ class PhraserRouter:
     def primary_enabled(self) -> bool:
         return self._primary is not None
 
-    def reasons(self, items: list[tuple[Candidate, CandidateScore]], profile: Profile) -> dict[str, str]:
+    def reasons(self, items: list[tuple[Candidate, CandidateScore]],
+                profile: Profile) -> tuple[dict[str, str], LlmUsage | None]:
         generated: dict[str, str] = {}
+        usage: LlmUsage | None = None
         if self._primary is not None:
             try:
-                generated = self._primary.reasons(items, profile)
+                generated, usage = self._primary.reasons(items, profile)
             except Exception as exc:  # 模型故障：本批全部回落模板
                 logger.warning("primary phraser failed, fallback to template: %s", exc)
         # 缺哪条补哪条：模型漏答、校验不通过、整批失败都走模板
@@ -120,7 +123,7 @@ class PhraserRouter:
             candidate.dishId: generated.get(candidate.dishId)
             or template_phraser.reason(candidate, score, profile)
             for candidate, score in items
-        }
+        }, usage
 
 
 def _user_prompt(items: list[tuple[Candidate, CandidateScore]], profile: Profile) -> str:

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from .config import settings
 from .degrade import Transition, degrade_controller
-from .llm import QwenClient
+from .llm import LlmUsage, QwenClient
 from .models import Profile
 
 logger = logging.getLogger("mealmind.agent.understander")
@@ -249,8 +249,9 @@ class QwenUnderstander:
     def __init__(self, client: QwenClient) -> None:
         self._client = client
 
-    def parse(self, text: str) -> Profile:
-        data = self._client.chat_json(_SYSTEM_PROMPT, text)
+    def parse(self, text: str) -> tuple[Profile, LlmUsage]:
+        result = self._client.chat_json(_SYSTEM_PROMPT, text)
+        data = result.data
         taste = [t for t in _as_list(data.get("taste_tags")) if t in _TASTE_VOCAB]
         avoid = [t for t in _as_list(data.get("avoid_ingredients")) if t in _AVOID_VOCAB]
         scene = data.get("scene") if data.get("scene") in _SCENE_VOCAB else None
@@ -258,7 +259,7 @@ class QwenUnderstander:
         if meal is None:
             # 与规则通道口径一致：未提及餐段时按当前时段推断
             meal = KeywordUnderstander._meal_period(text)
-        return Profile(
+        profile = Profile(
             taste_tags=list(dict.fromkeys(taste))[:5],
             budget_max=_as_number(data.get("budget_max"), 1, 200),
             avoid_ingredients=list(dict.fromkeys(avoid)),
@@ -268,15 +269,17 @@ class QwenUnderstander:
             notes=text.strip()[:100],
             open_questions=[],
         )
+        return profile, result.usage
 
 
 @dataclass(frozen=True)
 class UnderstandResult:
-    """一次理解的结果：偏好结构 + 是否走了兜底 + 档位迁移（有则上报 degraded）。"""
+    """一次理解的结果：偏好结构 + 是否走了兜底 + 档位迁移（有则上报 degraded）+ 模型用量。"""
 
     profile: Profile
     from_fallback: bool
     transition: Transition | None = None
+    usage: LlmUsage | None = None
 
 
 class UnderstanderRouter:
@@ -295,8 +298,8 @@ class UnderstanderRouter:
         if self._primary is None:
             return UnderstandResult(self._fallback.parse(text), True)
         try:
-            profile = self._primary.parse(text)
-            return UnderstandResult(profile, False, degrade_controller.record_understand(True))
+            profile, usage = self._primary.parse(text)
+            return UnderstandResult(profile, False, degrade_controller.record_understand(True), usage)
         except Exception as exc:  # 超时 / 网络 / 非 200 / 输出不合法：整体降级
             logger.warning("primary understander failed, fallback to rules: %s", exc)
             transition = degrade_controller.record_understand(False)
