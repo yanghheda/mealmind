@@ -18,6 +18,8 @@ public class DecisionCandidate {
     private Integer rankNo;
     private Integer isShown;
     private Integer isAddedToCart;
+    /** 推荐理由（≤30 字；M4 W3 落库，供换一批与快照恢复回填）。 */
+    private String reason;
 
     public String getRunId() {
         return runId;
@@ -73,5 +75,13 @@ public class DecisionCandidate {
 
     public void setIsAddedToCart(Integer isAddedToCart) {
         this.isAddedToCart = isAddedToCart;
+    }
+
+    public String getReason() {
+        return reason;
+    }
+
+    public void setReason(String reason) {
+        this.reason = reason;
     }
 }

@@ -15,5 +15,9 @@ public record RunSnapshotResponse(
         Integer latencyMs,
         java.math.BigDecimal costYuan,
         String rubricVersion,
-        String degradeLevel) {
+        String degradeLevel,
+        /** 待答澄清问题（clarify 事件原样载荷；M4 W2），未追问时为 null。 */
+        JsonNode clarify,
+        /** 澄清状态 PENDING / ANSWERED / SKIPPED（M4 W2），未追问时为 null。 */
+        String clarifyState) {
 }

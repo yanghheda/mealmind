@@ -71,13 +71,22 @@ mealmind:
       reputation: 0.20
       scene: 0.10
     max-candidates: 20
-    run-timeout-ms: 12000
+    # 整轮决策超时；可用 RUN_TIMEOUT_MS 覆盖（本地经代理访问 Jev 较慢，compose.local.yml 放宽）
+    run-timeout-ms: ${RUN_TIMEOUT_MS:12000}
+    # 澄清等待窗口（毫秒）：收到 clarify 后整轮超时换档为 run-timeout + clarify-timeout（M4 W2）
+    clarify-timeout-ms: ${CLARIFY_TIMEOUT_MS:60000}
     idempotency-seconds: 5
     max-concurrent-runs: 3
     rubric-version: v1.2
     heartbeat-seconds: 15
     # 打分缓存 TTL（秒）：键含 rubric 版本与需求指纹（技术方案 §6.3）
     score-cache-ttl-seconds: 600
+  # 成本计价（M4 W5，PRD §5.8 标价口径）：qwen 元/百万 token、Jev 元/次调用、单次成本门限
+  cost:
+    qwen-input-per-million: 12
+    qwen-output-per-million: 36
+    jev-per-call: 0.0003
+    gate-yuan: 0.01
   # 分页默认值与上限
   page-size-default: 10
   page-size-max: 50

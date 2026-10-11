@@ -104,7 +104,8 @@ public class ScoreRanker {
                 item.raw().mode(),
                 near,
                 item.fact().overBudget(),
-                item.fact().specGroups());
+                item.fact().specGroups(),
+                null);
     }
 
     private record Scored(RawCard raw, CandidateFact fact, BigDecimal composite, BigDecimal confidence) {

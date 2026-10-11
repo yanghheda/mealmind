@@ -26,6 +26,14 @@ public class DecisionRun {
     private String filteredDetail;
     private Integer latencyMs;
     private BigDecimal costYuan;
+    /** 本次带入的长期偏好 id（JSON 数组字符串；M4 偏好记忆）。 */
+    private String appliedPreferenceIds;
+    /** 待答澄清问题（clarify 事件载荷 JSON；M4 W2 追问）。 */
+    private String clarifyJson;
+    /** 澄清状态：PENDING / ANSWERED / SKIPPED（M4 W2 追问；null 表示本轮未追问）。 */
+    private String clarifyState;
+    /** REFINE 继承来源 run（接口 18 修正；M4 W3）。 */
+    private String parentRunId;
     private LocalDateTime createdAt;
 
     public String getId() {
@@ -138,6 +146,38 @@ public class DecisionRun {
 
     public void setCostYuan(BigDecimal costYuan) {
         this.costYuan = costYuan;
+    }
+
+    public String getAppliedPreferenceIds() {
+        return appliedPreferenceIds;
+    }
+
+    public void setAppliedPreferenceIds(String appliedPreferenceIds) {
+        this.appliedPreferenceIds = appliedPreferenceIds;
+    }
+
+    public String getClarifyJson() {
+        return clarifyJson;
+    }
+
+    public void setClarifyJson(String clarifyJson) {
+        this.clarifyJson = clarifyJson;
+    }
+
+    public String getClarifyState() {
+        return clarifyState;
+    }
+
+    public void setClarifyState(String clarifyState) {
+        this.clarifyState = clarifyState;
+    }
+
+    public String getParentRunId() {
+        return parentRunId;
+    }
+
+    public void setParentRunId(String parentRunId) {
+        this.parentRunId = parentRunId;
     }
 
     public LocalDateTime getCreatedAt() {

@@ -51,8 +51,9 @@ public class MerchantService {
      * 综合排序公式：评分权重 20（rating 0–5 -> 0–100），月售权重每 1000 单加 1 分、封顶 10000 单。
      * 即 rating * 20 + LEAST(monthly_sales, 10000) / 1000.0，降序；同分按 id 稳定排序。
      * 打烊商家（is_open = 0）仍保留在列表中，由前端标注「休息中」。
+     * 包级可见：SearchService（M4 W4 搜索）复用同一排序，保证首页与搜索结果一致。
      */
-    private static final String COMPOSITE_ORDER =
+    static final String COMPOSITE_ORDER =
             "ORDER BY rating * 20 + LEAST(monthly_sales, 10000) / 1000.0 DESC, id ASC";
 
     private static final String CATEGORY_ALL = "ALL";
@@ -170,14 +171,16 @@ public class MerchantService {
         return response;
     }
 
-    private MerchantListResponse pageMerchants(QueryWrapper<Merchant> wrapper, int page, int pageSize) {
+    /** 包级可见：供 SearchService 复用分页 + 视图组装。 */
+    MerchantListResponse pageMerchants(QueryWrapper<Merchant> wrapper, int page, int pageSize) {
         Page<Merchant> result = merchantMapper.selectPage(new Page<>(page, pageSize), wrapper);
         List<MerchantView> views = buildMerchantViews(result.getRecords());
         boolean hasMore = result.getTotal() > (long) page * pageSize;
         return new MerchantListResponse(views, result.getTotal(), hasMore);
     }
 
-    private List<MerchantView> buildMerchantViews(List<Merchant> merchants) {
+    /** 包级可见：供 SearchService 复用。 */
+    List<MerchantView> buildMerchantViews(List<Merchant> merchants) {
         if (merchants == null || merchants.isEmpty()) {
             return List.of();
         }
@@ -331,11 +334,12 @@ public class MerchantService {
         };
     }
 
-    private int normalizePage(Integer page) {
+    /** 包级可见：供 SearchService 复用分页参数归一化。 */
+    int normalizePage(Integer page) {
         return (page == null || page < 1) ? 1 : page;
     }
 
-    private int normalizePageSize(Integer pageSize) {
+    int normalizePageSize(Integer pageSize) {
         if (pageSize == null || pageSize < 1) {
             return properties.getPageSizeDefault();
         }

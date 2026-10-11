@@ -20,5 +20,6 @@ public record DecisionCardView(
         String mode,
         boolean near,
         boolean overBudget,
-        List<SpecGroupView> specGroups) {
+        List<SpecGroupView> specGroups,
+        String reason) {
 }

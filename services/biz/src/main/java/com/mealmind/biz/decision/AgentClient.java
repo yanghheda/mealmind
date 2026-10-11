@@ -17,6 +17,7 @@ import java.util.function.Consumer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mealmind.biz.config.AppProperties;
+import com.mealmind.biz.dto.ClarifyAnswersRequest;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -120,6 +121,33 @@ public class AgentClient {
         }
     }
 
+    /** 澄清回答 / 跳过（M4 W2）：把用户选择回填给暂停在澄清节点的图。 */
+    public void answers(String runId, List<ClarifyAnswersRequest.Answer> answers, boolean skipped) {
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("answers", answers);
+        payload.put("skipped", skipped);
+        HttpRequest request = base("/internal/decide/" + runId + "/answers")
+                .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(3))
+                .POST(HttpRequest.BodyPublishers.ofString(toJson(payload), StandardCharsets.UTF_8))
+                .build();
+        try {
+            HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            // 404：run 已不在 Agent 在途注册表；409：澄清已被超时收口或已答过 —— 都视为问题失效
+            if (response.statusCode() == 404 || response.statusCode() == 409) {
+                throw new ClarifyGoneException("clarify not pending, status=" + response.statusCode());
+            }
+            if (response.statusCode() != 200) {
+                throw new AgentUnavailableException("answer clarify returned " + response.statusCode());
+            }
+        } catch (IOException ex) {
+            throw new AgentUnavailableException("answer clarify failed: " + ex.getMessage(), ex);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new AgentUnavailableException("answer clarify interrupted", ex);
+        }
+    }
+
     /** 评测打分返回（profile + 卡片数组，均为原始 JSON 由调用方解析）。 */
     public record ScoreResult(JsonNode profile, JsonNode cards) {
     }
@@ -190,6 +218,14 @@ public class AgentClient {
 
         public AgentUnavailableException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    /** 澄清问题已失效（已被超时收口、已答过或 run 已结束）。 */
+    public static class ClarifyGoneException extends RuntimeException {
+
+        public ClarifyGoneException(String message) {
+            super(message);
         }
     }
 }

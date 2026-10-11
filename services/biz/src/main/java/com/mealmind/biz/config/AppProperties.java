@@ -45,12 +45,71 @@ public class AppProperties {
     /** 决策链路配置（技术方案 §8.5）。 */
     private Decision decision = new Decision();
 
+    /** 成本计价配置（M4 W5，PRD §5.8 标价口径）。 */
+    private Cost cost = new Cost();
+
     public Decision getDecision() {
         return decision;
     }
 
     public void setDecision(Decision decision) {
         this.decision = decision;
+    }
+
+    public Cost getCost() {
+        return cost;
+    }
+
+    public void setCost(Cost cost) {
+        this.cost = cost;
+    }
+
+    /** 计价参数：qwen 按每百万 token 单价，Jev 按每次调用单价；gate 为单次决策成本门限。 */
+    public static class Cost {
+
+        /** qwen 输入单价（元 / 百万 token）。 */
+        private BigDecimal qwenInputPerMillion = new BigDecimal("12");
+
+        /** qwen 输出单价（元 / 百万 token）。 */
+        private BigDecimal qwenOutputPerMillion = new BigDecimal("36");
+
+        /** Jev 单次调用单价（元）。 */
+        private BigDecimal jevPerCall = new BigDecimal("0.0003");
+
+        /** 单次决策成本门限（元）：看板 overGate 判定。 */
+        private BigDecimal gateYuan = new BigDecimal("0.01");
+
+        public BigDecimal getQwenInputPerMillion() {
+            return qwenInputPerMillion;
+        }
+
+        public void setQwenInputPerMillion(BigDecimal qwenInputPerMillion) {
+            this.qwenInputPerMillion = qwenInputPerMillion;
+        }
+
+        public BigDecimal getQwenOutputPerMillion() {
+            return qwenOutputPerMillion;
+        }
+
+        public void setQwenOutputPerMillion(BigDecimal qwenOutputPerMillion) {
+            this.qwenOutputPerMillion = qwenOutputPerMillion;
+        }
+
+        public BigDecimal getJevPerCall() {
+            return jevPerCall;
+        }
+
+        public void setJevPerCall(BigDecimal jevPerCall) {
+            this.jevPerCall = jevPerCall;
+        }
+
+        public BigDecimal getGateYuan() {
+            return gateYuan;
+        }
+
+        public void setGateYuan(BigDecimal gateYuan) {
+            this.gateYuan = gateYuan;
+        }
     }
 
     /** 决策链路：权重、候选上限、整轮超时、幂等与并发限制、档位版本。 */
@@ -69,6 +128,9 @@ public class AppProperties {
 
         /** 整轮决策超时（毫秒），超时返回已得结果 + error。 */
         private int runTimeoutMs = 12000;
+
+        /** 澄清等待窗口（毫秒）：收到 clarify 后看门狗换档为 runTimeoutMs + clarifyTimeoutMs（M4 W2）。 */
+        private int clarifyTimeoutMs = 60000;
 
         /** 幂等窗口（秒）：同一会话相同 text + mode 视为重复。 */
         private int idempotencySeconds = 5;
@@ -115,6 +177,14 @@ public class AppProperties {
 
         public void setRunTimeoutMs(int runTimeoutMs) {
             this.runTimeoutMs = runTimeoutMs;
+        }
+
+        public int getClarifyTimeoutMs() {
+            return clarifyTimeoutMs;
+        }
+
+        public void setClarifyTimeoutMs(int clarifyTimeoutMs) {
+            this.clarifyTimeoutMs = clarifyTimeoutMs;
         }
 
         public int getIdempotencySeconds() {

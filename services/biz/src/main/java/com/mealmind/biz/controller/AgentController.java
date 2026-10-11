@@ -1,9 +1,14 @@
 package com.mealmind.biz.controller;
 
+import java.util.Map;
+
 import com.mealmind.biz.common.ApiResponse;
 import com.mealmind.biz.decision.DecisionService;
+import com.mealmind.biz.dto.ClarifyAnswersRequest;
 import com.mealmind.biz.dto.CreateRunRequest;
 import com.mealmind.biz.dto.CreateRunResponse;
+import com.mealmind.biz.dto.RefineRequest;
+import com.mealmind.biz.dto.RefineResponse;
 import com.mealmind.biz.dto.RunSnapshotResponse;
 
 import org.springframework.http.MediaType;
@@ -17,8 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * 决策接口（技术方案 §4.1 接口 15/16/17）。
- * 接口 18（修正 / 换一批）随 M4 交互增强一并实现。
+ * 决策接口（技术方案 §4.1 接口 15/16/17/18）。
  */
 @RestController
 @RequestMapping("/api/agent")
@@ -47,5 +51,20 @@ public class AgentController {
     @GetMapping("/runs/{runId}")
     public ApiResponse<RunSnapshotResponse> snapshot(@PathVariable String runId) {
         return ApiResponse.ok(decisionService.snapshot(runId));
+    }
+
+    /** 澄清回答（M4 W2）：提交方向 / 预算选择，或一键跳过整轮追问。 */
+    @PostMapping("/runs/{runId}/answers")
+    public ApiResponse<Map<String, Object>> answers(@PathVariable String runId,
+                                                    @RequestBody ClarifyAnswersRequest request) {
+        decisionService.answerClarify(runId, request);
+        return ApiResponse.ok(Map.of("runId", runId, "accepted", true));
+    }
+
+    /** 接口 18：修正（REFINE，返回新 runId + streamUrl）或换一批（NEXT_BATCH，同 run 秒回下一组）。 */
+    @PostMapping("/runs/{runId}/refine")
+    public ApiResponse<RefineResponse> refine(@PathVariable String runId,
+                                              @RequestBody RefineRequest request) {
+        return ApiResponse.ok(decisionService.refine(runId, request));
     }
 }

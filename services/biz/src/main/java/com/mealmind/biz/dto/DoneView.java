@@ -8,7 +8,12 @@ public record DoneView(
         List<DecisionCardView> cards,
         long latencyMs,
         BigDecimal costYuan,
+        CostBreakdown costBreakdown,
         String rubricVersion,
         List<RelaxOption> relaxOptions,
         String degradeLevel) {
+
+    /** 成本构成（M4 W5）：token 用量与 Jev 调用次数；estimated=true 表示 token 为估算值。 */
+    public record CostBreakdown(int inputTokens, int outputTokens, int jevCalls, boolean estimated) {
+    }
 }
