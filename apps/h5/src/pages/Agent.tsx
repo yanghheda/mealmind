@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -8,13 +8,26 @@ import { SafeImg } from '../components/SafeImg'
 import { SpecSheet } from '../components/SpecSheet'
 import { fetchMerchant } from '../api/merchants'
 import { addCartItem } from '../api/cart'
+import {
+  PREFERENCE_QUERY_KEY,
+  deletePreference,
+  fetchPreferences,
+  preferenceLabel,
+} from '../api/preferences'
 import { CARD_PAGE_SIZE, useAgentSession } from '../hooks/useAgentSession'
 import type { RunBlock } from '../hooks/useAgentSession'
 import { CART_QUERY_KEY, useCart } from '../hooks/useCart'
 import { flyToCart } from '../lib/flyToCart'
 import { formatMoney } from '../lib/format'
 import { showToast } from '../store/ui'
-import type { DecisionCard, DimScore, RunProfile } from '../api/agent'
+import type {
+  ClarifyAnswer,
+  ClarifyEvent,
+  DecisionCard,
+  DimScore,
+  PreferenceSavedEvent,
+  RunProfile,
+} from '../api/agent'
 import type { AddCartItemRequest, DishView } from '../api/types'
 import './Agent.css'
 
@@ -27,6 +40,9 @@ const SAMPLES = [
 
 /** 底部快捷标签（整句需求，一点即发起）。 */
 const QUICK_CHIPS = ['微辣 30 元内', '清淡低卡', '不要香菜', '40 分钟内送到']
+
+/** done 块的「继续调整」chips（接口 18 REFINE：基于原需求追加一句修正）。 */
+const REFINE_CHIPS = ['再便宜点', '换清淡的', '更快送达']
 
 const DIM_LABELS: Record<string, string> = {
   taste: '口味',
@@ -42,14 +58,31 @@ export function Agent() {
   const merchantId = params.get('merchantId') ?? undefined
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { blocks, busy, submit, nextBatch, reset } = useAgentSession(
-    merchantId ? 'MERCHANT' : 'GLOBAL',
-    merchantId,
-  )
   const [input, setInput] = useState('')
+  /** 被用户点 x 移除的长期偏好：仅影响下一轮（MVP 不重发当前 run）。 */
+  const [excludedPrefIds, setExcludedPrefIds] = useState<string[]>([])
+  const [savedNotice, setSavedNotice] = useState<PreferenceSavedEvent | null>(null)
   const [specDish, setSpecDish] = useState<DishView | null>(null)
   const sourceRef = useRef<HTMLElement | null>(null)
   const chatRef = useRef<HTMLDivElement | null>(null)
+
+  const handlePreferenceSaved = useCallback(
+    (event: PreferenceSavedEvent) => {
+      setSavedNotice(event)
+      void queryClient.invalidateQueries({ queryKey: PREFERENCE_QUERY_KEY })
+    },
+    [queryClient],
+  )
+
+  const { blocks, busy, submit, answer, nextBatch, refine, reset } = useAgentSession(
+    merchantId ? 'MERCHANT' : 'GLOBAL',
+    merchantId,
+    { onPreferenceSaved: handlePreferenceSaved },
+  )
+
+  const prefsQuery = useQuery({ queryKey: PREFERENCE_QUERY_KEY, queryFn: fetchPreferences })
+  const memoryItems =
+    prefsQuery.data?.items.filter((item) => !excludedPrefIds.includes(item.id)) ?? []
 
   const merchantQuery = useQuery({
     queryKey: ['merchant', merchantId],
@@ -71,6 +104,12 @@ export function Agent() {
     })
   }, [blocks])
 
+  useEffect(() => {
+    if (!savedNotice) return
+    const timer = window.setTimeout(() => setSavedNotice(null), 6000)
+    return () => window.clearTimeout(timer)
+  }, [savedNotice])
+
   const back = () => {
     if (window.history.length > 1) navigate(-1)
     else navigate('/home')
@@ -79,8 +118,36 @@ export function Agent() {
   const send = (text: string) => {
     const trimmed = text.trim()
     if (!trimmed || busy) return
-    submit(trimmed)
+    // 偏好列表就绪时显式传当前未排除的 id（空数组 = 本轮全部不带入）；未就绪则不传，由后端默认全选 ACTIVE
+    submit(trimmed, prefsQuery.isSuccess ? memoryItems.map((item) => item.id) : undefined)
     setInput('')
+  }
+
+  const undoSaved = () => {
+    const items = savedNotice?.items ?? []
+    setSavedNotice(null)
+    void (async () => {
+      for (const item of items) {
+        try {
+          await deletePreference(item.id)
+        } catch {
+          // 单条撤销失败不阻塞其余条目
+        }
+      }
+      void queryClient.invalidateQueries({ queryKey: PREFERENCE_QUERY_KEY })
+      showToast('已撤销记忆')
+    })()
+  }
+
+  /** 换一批（接口 18 NEXT_BATCH）：服务端按已展示集合取下一组，秒回。 */
+  const handleNextBatch = (block: RunBlock) => {
+    void nextBatch(
+      block.id,
+      block.cards.map((card) => card.dishId),
+    ).then((result) => {
+      if (!result) showToast('换一批失败，请重试')
+      else if (!result.hasMore) showToast('已看完所有候选')
+    })
   }
 
   const handleAdd = (card: DecisionCard, event: MouseEvent<HTMLButtonElement>) => {
@@ -145,16 +212,51 @@ export function Agent() {
             <RunBlockView
               key={block.id}
               block={block}
-              onNextBatch={() => nextBatch(block.id)}
+              busy={busy}
+              onNextBatch={() => handleNextBatch(block)}
+              onRefine={(text) => refine(block.id, text)}
               onRetry={() => send(block.text)}
               onRelax={send}
               onAdd={handleAdd}
+              onAnswer={(answers, skipped) => answer(block.id, answers, skipped)}
             />
           ))}
         </div>
       </main>
 
       <div className="agent-inputbar">
+        {savedNotice && savedNotice.items.length > 0 && (
+          <div className="pref-undo">
+            <Icon name="sparkles" size={13} />
+            <span className="txt">
+              {savedNotice.promoted ? '已记住为长期偏好：' : '已记住：'}
+              {savedNotice.items.map((item) => preferenceLabel(item)).join('、')}
+            </span>
+            <button className="undo-btn" type="button" onClick={undoSaved}>
+              撤销
+            </button>
+          </div>
+        )}
+        {memoryItems.length > 0 && (
+          <div className="chips-scroll memory-bar">
+            <span className="memory-label">
+              <Icon name="sparkles" size={12} />
+              长期偏好
+            </span>
+            {memoryItems.map((item) => (
+              <button
+                className="chip memory-chip"
+                type="button"
+                key={item.id}
+                aria-label={`下一轮不带入 ${preferenceLabel(item)}`}
+                onClick={() => setExcludedPrefIds((prev) => [...prev, item.id])}
+              >
+                <span>{preferenceLabel(item)}</span>
+                <Icon name="x" size={12} />
+              </button>
+            ))}
+          </div>
+        )}
         <div className="chips-scroll">
           {QUICK_CHIPS.map((chip) => (
             <button className="chip" type="button" key={chip} onClick={() => send(chip)}>
@@ -252,24 +354,33 @@ function Welcome({
 
 function RunBlockView({
   block,
+  busy,
   onNextBatch,
+  onRefine,
   onRetry,
   onRelax,
   onAdd,
+  onAnswer,
 }: {
   block: RunBlock
+  busy: boolean
   onNextBatch: () => void
+  onRefine: (text: string) => void
   onRetry: () => void
   onRelax: (text: string) => void
   onAdd: (card: DecisionCard, event: MouseEvent<HTMLButtonElement>) => void
+  onAnswer: (answers: ClarifyAnswer[], skipped: boolean) => void
 }) {
-  const start = block.batchIndex * CARD_PAGE_SIZE
-  const visible = block.cards.slice(start, start + CARD_PAGE_SIZE)
-  const hasMore = block.phase === 'done' && block.cards.length > start + CARD_PAGE_SIZE
+  // 打分中只露首屏，done 后按页累加（换一批走服务端 接口 18）
+  const visible = block.phase === 'running' ? block.cards.slice(0, CARD_PAGE_SIZE) : block.cards
+  const hasMore = block.phase === 'done' && block.hasMore
 
   return (
     <>
-      <div className="bubble-user">{block.text}</div>
+      <div className="bubble-user">
+        {block.refined && <span className="refine-tag">基于上一条需求</span>}
+        <span>{block.text}</span>
+      </div>
 
       {block.degradeLevel === 'FULL' && (
         <div className="degrade-banner">
@@ -286,12 +397,21 @@ function RunBlockView({
             {block.fromFallback && <i className="mini-tag">规则解析</i>}
           </div>
           <div className="u-chips">
-            {profileChips(block.profile).map((chip) => (
+            {profileChips(block.profile, Boolean(block.clarify)).map((chip) => (
               <span className="u-chip" key={chip}>
                 {chip}
               </span>
             ))}
           </div>
+          {block.appliedPreferences.length > 0 && (
+            <div className="memory-note">
+              <Icon name="sparkles" size={12} />
+              <span>
+                本次已带入长期偏好：
+                {block.appliedPreferences.map((item) => preferenceLabel(item)).join('、')}
+              </span>
+            </div>
+          )}
           {block.filtered && (
             <div className="note-line">
               <Icon name="circle-check" size={13} />
@@ -301,7 +421,9 @@ function RunBlockView({
         </div>
       )}
 
-      {block.phase === 'running' && (
+      {block.clarify && <ClarifyCard clarify={block.clarify} onAnswer={onAnswer} />}
+
+      {block.phase === 'running' && !block.clarify && (
         <div className="ai-card">
           <div className="ai-label">
             <Icon name="sparkles" size={14} />
@@ -360,7 +482,7 @@ function RunBlockView({
               为你推荐
               <span className="results-sub">
                 {block.phase === 'done'
-                  ? `共 ${block.cards.length} 道候选`
+                  ? `共 ${block.totalCount} 道候选`
                   : '打分中…'}
               </span>
             </h3>
@@ -372,11 +494,109 @@ function RunBlockView({
             )}
           </div>
           {visible.map((card) => (
-            <RecCard key={card.dishId} card={card} reason={block.reasons[card.dishId]} onAdd={onAdd} />
+            <RecCard
+              key={card.dishId}
+              card={card}
+              reason={card.reason ?? block.reasons[card.dishId]}
+              onAdd={onAdd}
+            />
           ))}
         </div>
       )}
+
+      {block.phase === 'done' && block.cards.length > 0 && (
+        <div className="refine-bar">
+          <span className="refine-label">继续调整</span>
+          <div className="u-chips">
+            {REFINE_CHIPS.map((chip) => (
+              <button
+                className="chip"
+                type="button"
+                key={chip}
+                disabled={busy}
+                onClick={() => onRefine(chip)}
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </>
+  )
+}
+
+/* ---------------- 追问卡（W2） ---------------- */
+
+/** 方向追问：确定性选项 chips，选中至少一项可「继续推荐」，未选题目按跳过该问处理。 */
+function ClarifyCard({
+  clarify,
+  onAnswer,
+}: {
+  clarify: ClarifyEvent
+  onAnswer: (answers: ClarifyAnswer[], skipped: boolean) => void
+}) {
+  const [picked, setPicked] = useState<Record<string, string | null>>({})
+  const hasPicked = clarify.questions.some((question) => picked[question.id] != null)
+
+  const submitPicked = () => {
+    onAnswer(
+      clarify.questions.map((question) => ({
+        questionId: question.id,
+        optionId: picked[question.id] ?? null,
+      })),
+      false,
+    )
+  }
+
+  return (
+    <div className="ai-card clarify-card">
+      <div className="ai-label">
+        <Icon name="sparkles" size={14} />
+        <span>再确认一下，帮你挑得更准</span>
+      </div>
+      {clarify.questions.map((question) => (
+        <div className="clarify-q" key={question.id}>
+          <p className="clarify-title">{question.title}</p>
+          <div className="u-chips">
+            {question.options.map((option) => (
+              <button
+                className={`chip${picked[question.id] === option.id ? ' on' : ''}`}
+                type="button"
+                key={option.id}
+                onClick={() =>
+                  setPicked((prev) => ({
+                    ...prev,
+                    [question.id]: prev[question.id] === option.id ? null : option.id,
+                  }))
+                }
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      <div className="clarify-actions">
+        <button
+          className="btn btn-grad btn-sm"
+          type="button"
+          disabled={!hasPicked}
+          onClick={submitPicked}
+        >
+          继续推荐
+        </button>
+        {clarify.allowSkip && (
+          <button
+            className="btn btn-outline btn-sm"
+            type="button"
+            onClick={() => onAnswer([], true)}
+          >
+            跳过，直接推荐
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -447,7 +667,7 @@ function RecCard({
 
 /* ---------------- 文案工具 ---------------- */
 
-function profileChips(profile: RunProfile): string[] {
+function profileChips(profile: RunProfile, pendingClarify = false): string[] {
   const chips: string[] = []
   if (profile.taste_tags.length) chips.push(profile.taste_tags.join(' / '))
   if (profile.budget_max != null) chips.push(`${profile.budget_max} 元内`)
@@ -455,7 +675,9 @@ function profileChips(profile: RunProfile): string[] {
   if (profile.avoid_ingredients.length) chips.push(`不吃${profile.avoid_ingredients.join('、')}`)
   if (profile.scene) chips.push(profile.scene)
   if (profile.meal_period) chips.push(profile.meal_period)
-  return chips.length > 0 ? chips : ['没有识别到明确偏好，按热门推荐']
+  if (chips.length > 0) return chips
+  // 待答追问时不再说「按热门推荐」：此时还没收口，方向由用户下一步选择决定
+  return pendingClarify ? ['还没定方向，等你选一个'] : ['没有识别到明确偏好，按热门推荐']
 }
 
 function filteredText(filtered: {

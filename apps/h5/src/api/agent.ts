@@ -1,5 +1,6 @@
 import { apiFetch } from './client'
 import { clearSessionLocal, getSessionId } from '../store/session'
+import type { AppliedPreference, PreferenceView } from './preferences'
 import type { SpecGroupView } from './types'
 
 /* ---------------- 决策：请求与响应 ---------------- */
@@ -35,6 +36,8 @@ export interface DecisionCard {
   near: boolean
   overBudget: boolean
   specGroups: SpecGroupView[]
+  /** 推荐理由（W3 起：换一批与快照恢复的卡片带理由；实时流仍以 reason.delta 事件为准）。 */
+  reason?: string | null
 }
 
 export interface FilteredDetail {
@@ -62,6 +65,57 @@ export interface ScoringEvent {
 export interface ReasonDeltaEvent {
   dishId: string
   text: string
+}
+
+/** 追问卡选项（W2）：value 为该选项要写入 profile 的值（null = 不填，等同跳过该问）。 */
+export interface ClarifyOption {
+  id: string
+  label: string
+  value: string | null
+}
+
+export interface ClarifyQuestion {
+  id: string
+  type: 'TASTE' | 'BUDGET'
+  title: string
+  options: ClarifyOption[]
+  skippable: boolean
+}
+
+/** clarify 事件载荷（W2 追问）：一次最多 2 问。 */
+export interface ClarifyEvent {
+  questions: ClarifyQuestion[]
+  allowSkip: boolean
+  maxQuestions: number
+}
+
+/** clarify.resolved 事件载荷：answered / user_skip / timeout 三条路径都会下发，用于收起追问卡。 */
+export interface ClarifyResolvedEvent {
+  skipped: boolean
+  reason: 'answered' | 'user_skip' | 'timeout'
+}
+
+/** 单题回答：optionId 为 null 表示跳过该问题。 */
+export interface ClarifyAnswer {
+  questionId: string
+  optionId: string | null
+}
+
+/** understand 事件载荷：profile 之外向后兼容新增 appliedPreferences（本次带入的长期偏好）。 */
+export interface UnderstandEvent {
+  profile: RunProfile
+  fromFallback: boolean
+  appliedPreferences?: AppliedPreference[]
+  /** 本轮确定性澄清问题（W2）：非空表示业务服务门控过滤、等待用户回答。 */
+  questions?: ClarifyQuestion[]
+  /** 澄清收口后的二次理解（W2，向后兼容新增字段）。 */
+  clarifyResolved?: boolean
+}
+
+/** preference.saved 事件：本次新写/升级的偏好（promoted 表示由 PENDING 升级为 ACTIVE）。 */
+export interface PreferenceSavedEvent {
+  items: PreferenceView[]
+  promoted: boolean
 }
 
 export interface RelaxOption {
@@ -105,12 +159,17 @@ export interface RunSnapshot {
   costYuan: number | null
   rubricVersion: string
   degradeLevel: DegradeLevel
+  /** 待答澄清问题（W2）：status=RUNNING 且 clarifyState=PENDING 时用于恢复追问卡。 */
+  clarify: ClarifyEvent | null
+  clarifyState: 'PENDING' | 'ANSWERED' | 'SKIPPED' | null
 }
 
 export interface CreateRunRequest {
   text: string
   mode?: 'GLOBAL' | 'MERCHANT'
   merchantId?: string
+  /** 长期偏好带入（PRD 4.8）：undefined → 默认全选 ACTIVE；[] → 全部不带入。 */
+  preferenceIds?: string[] | null
 }
 
 /** POST /api/agent/runs —— 创建一次决策（幂等窗口由后端保证）。 */
@@ -121,6 +180,40 @@ export function createRun(request: CreateRunRequest): Promise<{ runId: string; s
 /** GET /api/agent/runs/{runId} —— 拉取快照（断线恢复对齐）。 */
 export function fetchRunSnapshot(runId: string): Promise<RunSnapshot> {
   return apiFetch(`/agent/runs/${encodeURIComponent(runId)}`)
+}
+
+/** POST /api/agent/runs/{runId}/answers —— 提交澄清回答或整轮跳过（W2；问题失效返回 409）。 */
+export function answerClarify(
+  runId: string,
+  request: { answers: ClarifyAnswer[]; skipped: boolean },
+): Promise<{ runId: string; accepted: boolean }> {
+  return apiFetch(`/agent/runs/${encodeURIComponent(runId)}/answers`, {
+    method: 'POST',
+    body: request,
+  })
+}
+
+/* ---------------- 接口 18：修正 / 换一批 ---------------- */
+
+export type RefineRequest =
+  /** 修正：基于原 run 新建继承 run，走完整理解链路（返回新 runId + streamUrl）。 */
+  | { type: 'REFINE'; text: string }
+  /** 换一批：同 run 从已落库候选里取下一组（零模型成本，秒回）。 */
+  | { type: 'NEXT_BATCH'; excludeDishIds: string[]; pageSize?: number }
+
+export interface RefineResponse {
+  runId: string
+  streamUrl: string | null
+  cards: DecisionCard[] | null
+  hasMore: boolean | null
+}
+
+/** POST /api/agent/runs/{runId}/refine —— 接口 18：修正 / 换一批（未完成的 run 返回 409）。 */
+export function refineRun(runId: string, request: RefineRequest): Promise<RefineResponse> {
+  return apiFetch(`/agent/runs/${encodeURIComponent(runId)}/refine`, {
+    method: 'POST',
+    body: request,
+  })
 }
 
 /* ---------------- 决策：SSE 订阅 ---------------- */

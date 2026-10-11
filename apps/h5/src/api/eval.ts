@@ -53,6 +53,15 @@ export interface BatchDetail {
   metrics: EvalMetric[]
 }
 
+/** 单次决策成本摘要（M4 W5）：标价口径，数据源为真实链路 run。 */
+export interface CostSummary {
+  avgCostYuan: number
+  p95LatencyMs: number
+  sampleSize: number
+  gateYuan: number
+  overGate: boolean
+}
+
 export const runEvalBatch = (triggeredBy?: string) =>
   apiFetch<EvalBatch>('/eval/batches', { method: 'POST', query: { triggeredBy } })
 
@@ -71,6 +80,9 @@ export const listBadcases = (status?: string) =>
 export const listGoldenCases = () =>
   apiFetch<GoldenCase[]>('/eval/golden-cases')
 
+export const getCostSummary = (limit?: number) =>
+  apiFetch<CostSummary>('/eval/cost-summary', { query: { limit } })
+
 export const METRIC_LABELS: Record<string, string> = {
   hard_constraint_pass_rate: '硬约束零违规率',
   understanding_accuracy: '理解准确率',
@@ -78,4 +90,7 @@ export const METRIC_LABELS: Record<string, string> = {
   empty_correctness: '空结果准确率',
   top1_taste_match: 'Top1 口味命中率',
   latency_p95_ms: 'P95 延迟(ms)',
+  stability_top1_consistency: 'Top1 一致性',
+  stability_dim_range_max: '维度分极差',
+  stability_pass_rate: '稳定性通过率',
 }

@@ -1,15 +1,20 @@
-import { useCallback, useRef, useState } from 'react'
-import { createRun, fetchRunSnapshot, openRunStream } from '../api/agent'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { answerClarify, createRun, fetchRunSnapshot, openRunStream, refineRun } from '../api/agent'
 import type {
+  ClarifyAnswer,
+  ClarifyEvent,
   DecisionCard,
   DegradeLevel,
   DoneEvent,
   ErrorEvent,
   FilteredEvent,
+  PreferenceSavedEvent,
   RunProfile,
   RelaxOption,
   ScoringEvent,
+  UnderstandEvent,
 } from '../api/agent'
+import type { AppliedPreference } from '../api/preferences'
 
 export const CARD_PAGE_SIZE = 4
 
@@ -29,6 +34,10 @@ export interface RunBlock {
   steps: ProgressStep[]
   profile: RunProfile | null
   fromFallback: boolean
+  /** 本次 run 实际带入的长期偏好（understand 事件新增字段），用于会话内展示。 */
+  appliedPreferences: AppliedPreference[]
+  /** 待答追问卡（W2）：clarify 事件到达后显示，回答 / 跳过 / 超时后清空。 */
+  clarify: ClarifyEvent | null
   /** 降级档位：NORMAL 无差异 / PARTIAL 部分卡片走规则分 / FULL 全部走规则分。 */
   degradeLevel: DegradeLevel
   filtered: FilteredEvent | null
@@ -38,7 +47,12 @@ export interface RunBlock {
   reasons: Record<string, string>
   error: ErrorEvent | null
   relaxOptions: RelaxOption[]
-  batchIndex: number
+  /** done 时的候选总数（换一批按页展示，卡片列表只保留已展示的部分）。 */
+  totalCount: number
+  /** 是否还有未展示的候选（done 时按总数判断，之后由服务端换一批接口回填）。 */
+  hasMore: boolean
+  /** 是否由「修正」发起（UI 标注「基于上一条需求」）。 */
+  refined: boolean
   latencyMs: number | null
 }
 
@@ -65,15 +79,56 @@ function advance(steps: ProgressStep[], doneKey: StepKey, nextKey?: StepKey): Pr
   })
 }
 
+/** 新决策块初始状态（refined = 由「修正」发起，runId 拿到后再回填）。 */
+function initialBlock(id: string, text: string, refined = false): RunBlock {
+  return {
+    id,
+    runId: null,
+    text,
+    phase: 'running',
+    steps: initialSteps(),
+    profile: null,
+    fromFallback: false,
+    appliedPreferences: [],
+    clarify: null,
+    degradeLevel: 'NORMAL',
+    filtered: null,
+    scoring: null,
+    cards: [],
+    reasons: {},
+    error: null,
+    relaxOptions: [],
+    totalCount: 0,
+    hasMore: false,
+    refined,
+    latencyMs: null,
+  }
+}
+
 /**
  * AI 决策会话状态机：一句话 → 进度步骤 → 带分卡片。
  * 事件驱动：SSE 事件与 LangGraph 节点边界一一对应；
  * 流异常结束时以快照兜底对齐（断线恢复口径）。
  */
-export function useAgentSession(mode?: 'GLOBAL' | 'MERCHANT', merchantId?: string) {
+export function useAgentSession(
+  mode?: 'GLOBAL' | 'MERCHANT',
+  merchantId?: string,
+  options?: { onPreferenceSaved?: (event: PreferenceSavedEvent) => void },
+) {
   const [blocks, setBlocks] = useState<RunBlock[]>([])
   const aborts = useRef(new Map<string, () => void>())
   const phases = useRef(new Map<string, RunBlock['phase']>())
+  /** 块 → runId（提交澄清回答时定位 run）。 */
+  const runIds = useRef(new Map<string, string>())
+  /** 已自动续订过流的块：澄清期间断流只自动恢复一次，避免断流循环（W2）。 */
+  const resumed = useRef(new Set<string>())
+  /** 指向最新的 recover（subscribe 的关闭/异常回调需要它，避免与 recover 循环依赖）。 */
+  const recoverRef = useRef<(blockId: string, runId: string) => void>(() => {})
+  const savedHandler = useRef(options?.onPreferenceSaved)
+
+  useEffect(() => {
+    savedHandler.current = options?.onPreferenceSaved
+  }, [options?.onPreferenceSaved])
 
   const patch = useCallback((blockId: string, update: (block: RunBlock) => RunBlock) => {
     setBlocks((prev) =>
@@ -90,13 +145,32 @@ export function useAgentSession(mode?: 'GLOBAL' | 'MERCHANT', merchantId?: strin
     (blockId: string, event: string, data: unknown) => {
       switch (event) {
         case 'understand': {
-          const payload = data as { profile: RunProfile; fromFallback: boolean }
+          const payload = data as UnderstandEvent
           patch(blockId, (block) => ({
             ...block,
             profile: payload.profile,
             fromFallback: payload.fromFallback,
-            steps: advance(block.steps, 'understand', 'filter'),
+            appliedPreferences: payload.appliedPreferences ?? [],
+            clarify: payload.clarifyResolved ? null : block.clarify,
+            // 首答含疑问时停在「理解需求」：等待用户回答，不推进到过滤（W2 门控同口径）
+            steps: payload.questions?.length
+              ? block.steps.map((step) =>
+                  step.key === 'understand' ? { ...step, status: 'done' as const } : step,
+                )
+              : advance(block.steps, 'understand', 'filter'),
           }))
+          break
+        }
+        case 'clarify': {
+          patch(blockId, (block) => ({ ...block, clarify: data as ClarifyEvent }))
+          break
+        }
+        case 'clarify.resolved': {
+          patch(blockId, (block) => ({ ...block, clarify: null }))
+          break
+        }
+        case 'preference.saved': {
+          savedHandler.current?.(data as PreferenceSavedEvent)
           break
         }
         case 'filtered': {
@@ -144,10 +218,14 @@ export function useAgentSession(mode?: 'GLOBAL' | 'MERCHANT', merchantId?: strin
         }
         case 'done': {
           const payload = data as DoneEvent
+          const all = payload.cards ?? []
           patch(blockId, (block) => ({
             ...block,
             phase: 'done',
-            cards: payload.cards,
+            // 换一批走服务端（接口 18）：客户端只保留首屏，避免与服务端分页重复
+            cards: all.slice(0, CARD_PAGE_SIZE),
+            totalCount: all.length,
+            hasMore: all.length > CARD_PAGE_SIZE,
             relaxOptions: payload.relaxOptions ?? [],
             latencyMs: payload.latencyMs,
             degradeLevel: payload.degradeLevel ?? block.degradeLevel,
@@ -174,29 +252,68 @@ export function useAgentSession(mode?: 'GLOBAL' | 'MERCHANT', merchantId?: strin
     [patch],
   )
 
-  /** 流结束时若仍处于运行态：拉快照对齐；快照未完成则提示重试。 */
+  /** 订阅一条决策流：正常关闭与网络异常都走 recover 兜底对齐（澄清等待中断流由 recover 续订一次）。 */
+  const subscribe = useCallback(
+    (blockId: string, runId: string, lastEventId?: number) => {
+      const abort = openRunStream(
+        runId,
+        {
+          onEvent: (event, data) => handleEvent(blockId, event, data),
+          onClose: () => {
+            aborts.current.delete(runId)
+            recoverRef.current(blockId, runId)
+          },
+          onError: () => {
+            aborts.current.delete(runId)
+            recoverRef.current(blockId, runId)
+          },
+        },
+        lastEventId,
+      )
+      aborts.current.set(runId, abort)
+    },
+    [handleEvent],
+  )
+
+  /** 流结束时若仍处于运行态：拉快照对齐；澄清等待中则恢复追问卡并按 seq 续订（W2）。 */
   const recover = useCallback(
     async (blockId: string, runId: string) => {
       if (phases.current.get(blockId) !== 'running') return
       try {
         const snapshot = await fetchRunSnapshot(runId)
         if (snapshot.status === 'DONE' || snapshot.status === 'DEGRADED') {
+          const all = snapshot.cards ?? []
           patch(blockId, (block) => ({
             ...block,
             phase: 'done',
             profile: block.profile ?? snapshot.profile,
-            cards: snapshot.cards,
+            cards: all.slice(0, CARD_PAGE_SIZE),
+            totalCount: all.length,
+            hasMore: all.length > CARD_PAGE_SIZE,
             latencyMs: snapshot.latencyMs,
             degradeLevel: snapshot.degradeLevel ?? block.degradeLevel,
             steps: block.steps.map((step) => ({ ...step, status: 'done' as const })),
           }))
-        } else {
+          return
+        }
+        if (snapshot.status === 'RUNNING' && snapshot.clarifyState === 'PENDING' && snapshot.clarify) {
+          // 追问等待中的断流：恢复追问卡并续订流；每个块最多自动续订一次，避免断流循环
           patch(blockId, (block) => ({
             ...block,
-            phase: 'error',
-            error: { code: 'RUN_INTERRUPTED', message: '连接中断，请重试', retryable: true },
+            profile: block.profile ?? snapshot.profile,
+            clarify: block.clarify ?? snapshot.clarify,
           }))
+          if (!resumed.current.has(blockId)) {
+            resumed.current.add(blockId)
+            subscribe(blockId, runId, snapshot.lastSeq)
+          }
+          return
         }
+        patch(blockId, (block) => ({
+          ...block,
+          phase: 'error',
+          error: { code: 'RUN_INTERRUPTED', message: '连接中断，请重试', retryable: true },
+        }))
       } catch {
         patch(blockId, (block) => ({
           ...block,
@@ -205,62 +322,28 @@ export function useAgentSession(mode?: 'GLOBAL' | 'MERCHANT', merchantId?: strin
         }))
       }
     },
-    [patch],
+    [patch, subscribe],
   )
 
+  useEffect(() => {
+    recoverRef.current = (blockId, runId) => {
+      void recover(blockId, runId)
+    }
+  }, [recover])
+
   const submit = useCallback(
-    (text: string) => {
+    (text: string, preferenceIds?: string[]) => {
       const trimmed = text.trim()
       if (!trimmed) return
       const blockId = `b-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-      const block: RunBlock = {
-        id: blockId,
-        runId: null,
-        text: trimmed,
-        phase: 'running',
-        steps: initialSteps(),
-        profile: null,
-        fromFallback: false,
-        degradeLevel: 'NORMAL',
-        filtered: null,
-        scoring: null,
-        cards: [],
-        reasons: {},
-        error: null,
-        relaxOptions: [],
-        batchIndex: 0,
-        latencyMs: null,
-      }
       phases.current.set(blockId, 'running')
-      setBlocks((prev) => [...prev, block])
+      setBlocks((prev) => [...prev, initialBlock(blockId, trimmed)])
 
-      createRun({ text: trimmed, mode, merchantId })
+      createRun({ text: trimmed, mode, merchantId, preferenceIds })
         .then(({ runId }) => {
+          runIds.current.set(blockId, runId)
           patch(blockId, (current) => ({ ...current, runId }))
-          const abort = openRunStream(runId, {
-            onEvent: (event, data) => handleEvent(blockId, event, data),
-            onClose: () => {
-              aborts.current.delete(runId)
-              void recover(blockId, runId)
-            },
-            onError: (error) => {
-              aborts.current.delete(runId)
-              patch(blockId, (current) =>
-                current.phase === 'running'
-                  ? {
-                      ...current,
-                      phase: 'error',
-                      error: {
-                        code: 'STREAM_ERROR',
-                        message: error instanceof Error ? error.message : '连接中断，请重试',
-                        retryable: true,
-                      },
-                    }
-                  : current,
-              )
-            },
-          })
-          aborts.current.set(runId, abort)
+          subscribe(blockId, runId)
         })
         .catch((error) => {
           patch(blockId, (current) => ({
@@ -274,21 +357,116 @@ export function useAgentSession(mode?: 'GLOBAL' | 'MERCHANT', merchantId?: strin
           }))
         })
     },
-    [handleEvent, merchantId, mode, patch, recover],
+    [merchantId, mode, patch, subscribe],
   )
 
+  /** 提交澄清回答 / 整轮跳过（W2）：乐观收起追问卡，失败时用快照兜底恢复。 */
+  const answer = useCallback(
+    async (blockId: string, answers: ClarifyAnswer[], skipped: boolean) => {
+      const runId = runIds.current.get(blockId)
+      if (!runId) return
+      patch(blockId, (block) => ({ ...block, clarify: null }))
+      try {
+        await answerClarify(runId, { answers, skipped })
+      } catch {
+        try {
+          const snapshot = await fetchRunSnapshot(runId)
+          if (
+            snapshot.status === 'RUNNING' &&
+            snapshot.clarifyState === 'PENDING' &&
+            snapshot.clarify
+          ) {
+            patch(blockId, (block) => ({ ...block, clarify: snapshot.clarify }))
+            return
+          }
+        } catch {
+          // 快照也拿不到：交给后续断流恢复 / 超时兜底
+        }
+        void recover(blockId, runId)
+      }
+    },
+    [patch, recover],
+  )
+
+  /**
+   * 换一批（接口 18 NEXT_BATCH）：同 run 从服务端取下一组（跳过已展示），零模型成本、秒回。
+   * 返回服务端 hasMore（false = 已看完）；请求失败返回 null，由调用方提示。
+   */
   const nextBatch = useCallback(
-    (blockId: string) => patch(blockId, (block) => ({ ...block, batchIndex: block.batchIndex + 1 })),
+    async (blockId: string, excludeDishIds: string[]): Promise<{ hasMore: boolean } | null> => {
+      const runId = runIds.current.get(blockId)
+      if (!runId) return null
+      try {
+        const page = await refineRun(runId, {
+          type: 'NEXT_BATCH',
+          excludeDishIds,
+          pageSize: CARD_PAGE_SIZE,
+        })
+        const cards = page.cards ?? []
+        patch(blockId, (block) => {
+          const known = new Set(block.cards.map((card) => card.dishId))
+          const reasons = { ...block.reasons }
+          for (const card of cards) {
+            if (card.reason) reasons[card.dishId] = card.reason
+          }
+          return {
+            ...block,
+            cards: [...block.cards, ...cards.filter((card) => !known.has(card.dishId))],
+            reasons,
+            hasMore: Boolean(page.hasMore),
+          }
+        })
+        return { hasMore: Boolean(page.hasMore) }
+      } catch {
+        return null
+      }
+    },
     [patch],
+  )
+
+  /**
+   * 修正（接口 18 REFINE）：基于原 block 的 run 新建继承 run；块内展示本次修正，
+   * 提交文本由服务端拼接「原话 + 修正」，模式与带入偏好一并继承。
+   */
+  const refine = useCallback(
+    (blockId: string, text: string) => {
+      const trimmed = text.trim()
+      const parentRunId = runIds.current.get(blockId)
+      if (!trimmed || !parentRunId) return
+      const newBlockId = `b-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+      phases.current.set(newBlockId, 'running')
+      setBlocks((prev) => [...prev, initialBlock(newBlockId, trimmed, true)])
+
+      refineRun(parentRunId, { type: 'REFINE', text: trimmed })
+        .then(({ runId }) => {
+          runIds.current.set(newBlockId, runId)
+          patch(newBlockId, (current) => ({ ...current, runId }))
+          subscribe(newBlockId, runId)
+        })
+        .catch((error) => {
+          patch(newBlockId, (current) => ({
+            ...current,
+            phase: 'error',
+            error: {
+              code: 'REFINE_FAILED',
+              message: error instanceof Error ? error.message : '调整失败，请重试',
+              retryable: false,
+            },
+          }))
+        })
+    },
+    [patch, subscribe],
   )
 
   const reset = useCallback(() => {
     aborts.current.forEach((abort) => abort())
     aborts.current.clear()
     phases.current.clear()
+    runIds.current.clear()
+    resumed.current.clear()
     setBlocks([])
   }, [])
 
   const busy = blocks.some((block) => block.phase === 'running')
-  return { blocks, busy, submit, nextBatch, reset }
+  return { blocks, busy, submit, answer, nextBatch, refine, reset }
 }

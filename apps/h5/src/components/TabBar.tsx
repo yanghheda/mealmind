@@ -5,13 +5,13 @@ import { showToast } from '../store/ui'
 import { PLACEHOLDER_TOAST } from '../lib/constants'
 
 interface TabBarProps {
-  /** 当前激活项；仅 home / cart 有真实页面。 */
-  active: 'home' | 'cart'
+  /** 当前激活项；home / cart / mine 有真实页面。 */
+  active: 'home' | 'cart' | 'mine'
 }
 
 /**
  * 冻结导航（设计契约 §5 变体 A）。
- * 消息 / 我的 未实现，统一走 §7 占位提示；AI 点外卖进会话页；购物车角标由真实购物车数量驱动。
+ * 消息未实现，走 §7 占位提示；AI 点外卖进会话页；购物车角标由真实购物车数量驱动。
  */
 export function TabBar({ active }: TabBarProps) {
   const { data } = useCart()
@@ -42,10 +42,10 @@ export function TabBar({ active }: TabBarProps) {
         </span>
         <span>购物车</span>
       </Link>
-      <button className="tab" type="button" onClick={placeholder}>
+      <Link className={active === 'mine' ? 'tab is-active' : 'tab'} data-nav="mine" to="/mine">
         <Icon name="user" />
         <span>我的</span>
-      </button>
+      </Link>
     </nav>
   )
 }

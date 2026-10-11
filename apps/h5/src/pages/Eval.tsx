@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { StatusBar } from '../components/StatusBar'
 import { Icon } from '../components/Icon'
 import {
+  getCostSummary,
   getEvalBatch,
   listBadcases,
   listEvalBatches,
@@ -10,7 +11,6 @@ import {
   runEvalBatch,
   METRIC_LABELS,
   type Badcase,
-  type EvalBatch,
 } from '../api/eval'
 import { showToast } from '../store/ui'
 import './Eval.css'
@@ -22,6 +22,9 @@ const METRIC_KEYS = [
   'empty_correctness',
   'top1_taste_match',
   'latency_p95_ms',
+  'stability_top1_consistency',
+  'stability_dim_range_max',
+  'stability_pass_rate',
 ]
 
 /** 评测看板页（PRD 4.9）：触发批次、看指标、查 badcase。 */
@@ -47,6 +50,10 @@ export function Eval() {
     queryFn: () => getEvalBatch(selectedBatchId!),
     enabled: !!selectedBatchId,
   })
+  const { data: costSummary } = useQuery({
+    queryKey: ['eval-cost-summary'],
+    queryFn: () => getCostSummary(),
+  })
 
   const runMutation = useMutation({
     mutationFn: () => runEvalBatch('h5'),
@@ -64,11 +71,11 @@ export function Eval() {
 
   return (
     <div className="eval-page">
-      <StatusBar title="评测看板" />
+      <StatusBar />
 
       <section className="eval-hero">
         <button className="eval-run-btn" disabled={runMutation.isPending} onClick={() => runMutation.mutate()}>
-          <Icon name="spark" />
+          <Icon name="sparkles" />
           {runMutation.isPending ? '评测中…' : '跑一次全量评测'}
         </button>
         <p className="eval-hero-sub">
@@ -77,14 +84,42 @@ export function Eval() {
         </p>
       </section>
 
+      {costSummary && (
+        <section className="eval-cost">
+          <h2>单次决策成本</h2>
+          <div className="metric-grid">
+            <div className="metric-card">
+              <div className="metric-label">平均成本（元/次）</div>
+              <div className="metric-value">{costSummary.avgCostYuan.toFixed(5)}</div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-label">门限（元/次）</div>
+              <div className={`metric-value ${costSummary.overGate ? 'cost-over' : 'cost-ok'}`}>
+                {costSummary.gateYuan.toFixed(2)}
+                <span className="cost-flag">{costSummary.overGate ? '超门限' : '达标'}</span>
+              </div>
+            </div>
+          </div>
+          <p className="eval-batch-meta">
+            样本 {costSummary.sampleSize} 次 · P95 延迟 {Math.round(costSummary.p95LatencyMs)}ms ·
+            标价口径（免费额度内实付 0）
+          </p>
+        </section>
+      )}
+
       {latestBatch && (
         <section className="eval-metrics">
           <h2>最新批次指标</h2>
           <div className="metric-grid">
             {METRIC_KEYS.map((key) => {
               const m = metricMap.get(key)
-              const isLatency = key === 'latency_p95_ms'
-              const value = m ? (isLatency ? Math.round(m.metricValue) : `${m.metricValue}%`) : '—'
+              const value = !m
+                ? '—'
+                : key === 'latency_p95_ms'
+                  ? Math.round(m.metricValue)
+                  : key === 'stability_dim_range_max'
+                    ? m.metricValue.toFixed(2)
+                    : `${m.metricValue}%`
               return (
                 <div key={key} className="metric-card">
                   <div className="metric-label">{METRIC_LABELS[key] ?? key}</div>

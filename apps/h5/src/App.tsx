@@ -7,8 +7,10 @@ import { Merchant } from './pages/Merchant'
 import { Cart } from './pages/Cart'
 import { Agent } from './pages/Agent'
 import { Eval } from './pages/Eval'
+import { Mine } from './pages/Mine'
+import { Search } from './pages/Search'
 
-/** 路由表：封面 / 首页 / 商家详情 / 购物车 / AI 会话；其余路径回封面。 */
+/** 路由表：封面 / 首页 / 商家详情 / 购物车 / AI 会话 / 我的；其余路径回封面。 */
 function App() {
   return (
     <>
@@ -27,6 +29,14 @@ function App() {
           element={
             <RequireSession>
               <Merchant />
+            </RequireSession>
+          }
+        />
+        <Route
+          path="/search"
+          element={
+            <RequireSession>
+              <Search />
             </RequireSession>
           }
         />
@@ -51,6 +61,14 @@ function App() {
           element={
             <RequireSession>
               <Eval />
+            </RequireSession>
+          }
+        />
+        <Route
+          path="/mine"
+          element={
+            <RequireSession>
+              <Mine />
             </RequireSession>
           }
         />

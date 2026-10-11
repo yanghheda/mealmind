@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import type { CSSProperties } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { StatusBar } from '../components/StatusBar'
 import { TabBar } from '../components/TabBar'
 import { Icon } from '../components/Icon'
@@ -13,6 +14,7 @@ import './Home.css'
 /** 首页（Shell 变体 A）：定位 / 搜索 / 分类宫格 / 推广条 / 推荐商家流。 */
 export function Home() {
   const listRef = useRef<HTMLDivElement>(null)
+  const navigate = useNavigate()
   const query = useInfiniteQuery({
     queryKey: ['home', 'merchants'],
     queryFn: ({ pageParam }) => fetchHomeMerchants(pageParam, 10),
@@ -40,11 +42,7 @@ export function Home() {
                 <Icon name="scan" size={18} />
               </span>
               <input type="text" placeholder={SEARCH_PLACEHOLDER} aria-label="搜索商家、菜品" />
-              <button
-                className="btn-search"
-                type="button"
-                onClick={() => showToast('演示版本暂未开放搜索功能')}
-              >
+              <button className="btn-search" type="button" onClick={() => navigate('/search')}>
                 搜索
               </button>
             </div>

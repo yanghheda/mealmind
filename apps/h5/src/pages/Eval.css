@@ -51,6 +51,7 @@
   margin-left: auto;
 }
 
+.eval-cost,
 .eval-metrics,
 .eval-batches,
 .eval-badcases {
@@ -60,12 +61,31 @@
   padding: 16px;
 }
 
+.eval-cost h2,
 .eval-metrics h2,
 .eval-batches h2,
 .eval-badcases h2 {
   font-size: 16px;
   font-weight: 600;
   margin: 0 0 12px;
+}
+
+.cost-ok {
+  color: #2e7d32;
+}
+
+.cost-over {
+  color: #c62828;
+}
+
+.cost-flag {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #f0f0f3;
+  vertical-align: middle;
 }
 
 .metric-grid {

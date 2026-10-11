@@ -104,6 +104,30 @@ export interface MenuResponse {
   categories: MenuCategoryView[]
 }
 
+/* ---------------- 搜索 ---------------- */
+
+/** 搜索结果菜品行（tags 已按展示优先级排序，最多 3 个）。 */
+export interface SearchDishView {
+  dishId: string
+  name: string
+  imageUrl: string
+  price: number
+  merchantId: string
+  merchantName: string
+  deliveryMinutes: number
+  tags: string[]
+}
+
+/** GET /api/search 响应：商家沿用综合排序（hasMore 指商家），菜品按月售降序截断。 */
+export interface SearchResponse {
+  keyword: string
+  merchants: MerchantView[]
+  dishes: SearchDishView[]
+  merchantTotal: number
+  hasMore: boolean
+  dishTotal: number
+}
+
 /* ---------------- 购物车 ---------------- */
 
 export interface CartItemView {
