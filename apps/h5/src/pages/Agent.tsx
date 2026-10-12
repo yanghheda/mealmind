@@ -139,12 +139,9 @@ export function Agent() {
     })()
   }
 
-  /** 换一批（接口 18 NEXT_BATCH）：服务端按已展示集合取下一组，秒回。 */
+  /** 换一批（接口 18 NEXT_BATCH）：服务端按已展示集合取下一组并替换当前批次，秒回。 */
   const handleNextBatch = (block: RunBlock) => {
-    void nextBatch(
-      block.id,
-      block.cards.map((card) => card.dishId),
-    ).then((result) => {
+    void nextBatch(block.id).then((result) => {
       if (!result) showToast('换一批失败，请重试')
       else if (!result.hasMore) showToast('已看完所有候选')
     })
@@ -371,7 +368,7 @@ function RunBlockView({
   onAdd: (card: DecisionCard, event: MouseEvent<HTMLButtonElement>) => void
   onAnswer: (answers: ClarifyAnswer[], skipped: boolean) => void
 }) {
-  // 打分中只露首屏，done 后按页累加（换一批走服务端 接口 18）
+  // 打分中只露首屏；done 后由「换一批」按页替换展示（走服务端接口 18）
   const visible = block.phase === 'running' ? block.cards.slice(0, CARD_PAGE_SIZE) : block.cards
   const hasMore = block.phase === 'done' && block.hasMore
 

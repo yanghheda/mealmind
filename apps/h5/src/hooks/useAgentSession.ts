@@ -42,14 +42,14 @@ export interface RunBlock {
   degradeLevel: DegradeLevel
   filtered: FilteredEvent | null
   scoring: ScoringEvent | null
-  /** 打分阶段逐步到达；done 后替换为最终排序结果（带并列标记）。 */
+  /** 打分阶段逐步到达；done 后为首屏一批，换一批按页替换展示。 */
   cards: DecisionCard[]
   reasons: Record<string, string>
   error: ErrorEvent | null
   relaxOptions: RelaxOption[]
-  /** done 时的候选总数（换一批按页展示，卡片列表只保留已展示的部分）。 */
+  /** done 时的候选总数（换一批按页替换，卡片列表只保留当前一批）。 */
   totalCount: number
-  /** 是否还有未展示的候选（done 时按总数判断，之后由服务端换一批接口回填）。 */
+  /** 是否还有未展示过的候选（done 时按总数判断，之后由服务端换一批接口更新）。 */
   hasMore: boolean
   /** 是否由「修正」发起（UI 标注「基于上一条需求」）。 */
   refined: boolean
@@ -120,6 +120,8 @@ export function useAgentSession(
   const phases = useRef(new Map<string, RunBlock['phase']>())
   /** 块 → runId（提交澄清回答时定位 run）。 */
   const runIds = useRef(new Map<string, string>())
+  /** 块 → 已展示过的菜品 id 集合：换一批按此排除，保证替换后不与历史卡片重复。 */
+  const shownDishIds = useRef(new Map<string, Set<string>>())
   /** 已自动续订过流的块：澄清期间断流只自动恢复一次，避免断流循环（W2）。 */
   const resumed = useRef(new Set<string>())
   /** 指向最新的 recover（subscribe 的关闭/异常回调需要它，避免与 recover 循环依赖）。 */
@@ -219,11 +221,13 @@ export function useAgentSession(
         case 'done': {
           const payload = data as DoneEvent
           const all = payload.cards ?? []
+          // 首屏只展示前 CARD_PAGE_SIZE 张；后续候选由「换一批」按页替换（已展示集合用于排除去重）
+          const firstPage = all.slice(0, CARD_PAGE_SIZE)
+          shownDishIds.current.set(blockId, new Set(firstPage.map((card) => card.dishId)))
           patch(blockId, (block) => ({
             ...block,
             phase: 'done',
-            // 换一批走服务端（接口 18）：客户端只保留首屏，避免与服务端分页重复
-            cards: all.slice(0, CARD_PAGE_SIZE),
+            cards: firstPage,
             totalCount: all.length,
             hasMore: all.length > CARD_PAGE_SIZE,
             relaxOptions: payload.relaxOptions ?? [],
@@ -283,11 +287,13 @@ export function useAgentSession(
         const snapshot = await fetchRunSnapshot(runId)
         if (snapshot.status === 'DONE' || snapshot.status === 'DEGRADED') {
           const all = snapshot.cards ?? []
+          const firstPage = all.slice(0, CARD_PAGE_SIZE)
+          shownDishIds.current.set(blockId, new Set(firstPage.map((card) => card.dishId)))
           patch(blockId, (block) => ({
             ...block,
             phase: 'done',
             profile: block.profile ?? snapshot.profile,
-            cards: all.slice(0, CARD_PAGE_SIZE),
+            cards: firstPage,
             totalCount: all.length,
             hasMore: all.length > CARD_PAGE_SIZE,
             latencyMs: snapshot.latencyMs,
@@ -389,13 +395,15 @@ export function useAgentSession(
   )
 
   /**
-   * 换一批（接口 18 NEXT_BATCH）：同 run 从服务端取下一组（跳过已展示），零模型成本、秒回。
-   * 返回服务端 hasMore（false = 已看完）；请求失败返回 null，由调用方提示。
+   * 换一批（接口 18 NEXT_BATCH）：同 run 从服务端取下一组（排除已展示过的候选，保证不重复），
+   * 用下一组替换当前这一批（PRD：替换而非累加），零模型成本、秒回。
+   * 返回服务端 hasMore（false = 已看完所有候选）；请求失败返回 null，由调用方提示。
    */
   const nextBatch = useCallback(
-    async (blockId: string, excludeDishIds: string[]): Promise<{ hasMore: boolean } | null> => {
+    async (blockId: string): Promise<{ hasMore: boolean } | null> => {
       const runId = runIds.current.get(blockId)
       if (!runId) return null
+      const excludeDishIds = Array.from(shownDishIds.current.get(blockId) ?? [])
       try {
         const page = await refineRun(runId, {
           type: 'NEXT_BATCH',
@@ -403,15 +411,22 @@ export function useAgentSession(
           pageSize: CARD_PAGE_SIZE,
         })
         const cards = page.cards ?? []
+        if (cards.length > 0) {
+          const shown = shownDishIds.current.get(blockId) ?? new Set<string>()
+          for (const card of cards) {
+            shown.add(card.dishId)
+          }
+          shownDishIds.current.set(blockId, shown)
+        }
         patch(blockId, (block) => {
-          const known = new Set(block.cards.map((card) => card.dishId))
           const reasons = { ...block.reasons }
           for (const card of cards) {
             if (card.reason) reasons[card.dishId] = card.reason
           }
           return {
             ...block,
-            cards: [...block.cards, ...cards.filter((card) => !known.has(card.dishId))],
+            // 替换当前一批；已无更多候选时保留当前展示，由调用方提示「已看完所有候选」
+            cards: cards.length > 0 ? cards : block.cards,
             reasons,
             hasMore: Boolean(page.hasMore),
           }
@@ -463,6 +478,7 @@ export function useAgentSession(
     aborts.current.clear()
     phases.current.clear()
     runIds.current.clear()
+    shownDishIds.current.clear()
     resumed.current.clear()
     setBlocks([])
   }, [])
