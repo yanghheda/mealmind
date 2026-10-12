@@ -26,3 +26,7 @@ services:
     image: mealmind-agent:local
     build:
       context: ../services/agent
+    environment:
+      # Jev 模型已从 TeamoRouter 下线（2026-10-12 确认），本地演示暂时固定走规则分（M2 基线）：
+      # 不显示降级横幅、run 记为 DONE/NORMAL、响应秒级；如需现场演示降级链路，把本行改为 AUTO
+      SCORER_MODE: "RULE"
