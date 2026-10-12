@@ -1,0 +1,295 @@
+# MealMind 发布流水线（技术方案 §8.3）：CI 构建镜像 → 推送 GHCR → 服务器 SSH 拉取重启。
+# 服务器上不落地源码、不构建，只 pull + up；按变更路径只重建受影响的服务。
+#
+# 仓库需配置（Environment `production`）：
+#   secrets： DEPLOY_HOST / DEPLOY_USER / DEPLOY_SSH_PRIVATE_KEY / DEPLOY_KNOWN_HOSTS
+#   variable：DEPLOY_PATH=/opt/mealmind
+# 服务器侧一次性准备（目录、deploy/.env、GHCR 拉取权限）见 docs/tech-design.md §8.2。
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/h5/**'
+      - 'services/biz/**'
+      - 'services/agent/**'
+      - 'deploy/**'
+  workflow_dispatch:
+    inputs:
+      service:
+        description: '重建并部署的服务'
+        type: choice
+        options: [all, web, api, agent]
+        default: all
+      sync_only:
+        description: '仅同步 deploy 资产（compose / sql / nginx 配置），不重建镜像'
+        type: boolean
+        default: false
+
+# 同一分支串行发布，避免两次 push 的部署互相踩踏；不打断进行中的发布
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # 变更识别：算出需要重建的服务集合；deploy/** 单独变更时只做资产同步
+  prepare:
+    name: 变更识别
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.calc.outputs.web }}
+      api: ${{ steps.calc.outputs.api }}
+      agent: ${{ steps.calc.outputs.agent }}
+      sync_only: ${{ steps.calc.outputs.sync_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 需要与 github.event.before 做 diff
+      - id: calc
+        name: 计算变更范围
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_SERVICE: ${{ inputs.service }}
+          INPUT_SYNC_ONLY: ${{ inputs.sync_only }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          web=false api=false agent=false sync_only=false
+
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ "$INPUT_SYNC_ONLY" = "true" ]; then
+              sync_only=true
+            else
+              case "$INPUT_SERVICE" in
+                all)   web=true; api=true; agent=true ;;
+                web)   web=true ;;
+                api)   api=true ;;
+                agent) agent=true ;;
+              esac
+            fi
+          elif git cat-file -e "$BEFORE" 2>/dev/null; then
+            CHANGED="$(git diff --name-only "$BEFORE" "$SHA")"
+            printf '%s\n' "$CHANGED" | grep -q '^apps/h5/'        && web=true   || true
+            printf '%s\n' "$CHANGED" | grep -q '^services/biz/'   && api=true   || true
+            printf '%s\n' "$CHANGED" | grep -q '^services/agent/' && agent=true || true
+            # deploy/** 变更且没有服务需要重建 → 只同步 compose / sql / nginx 配置
+            if printf '%s\n' "$CHANGED" | grep -q '^deploy/'; then
+              if [ "$web" = false ] && [ "$api" = false ] && [ "$agent" = false ]; then
+                sync_only=true
+              fi
+            fi
+          else
+            # 首次推送（before 为全零）无法 diff：全量重建
+            web=true; api=true; agent=true
+          fi
+
+          {
+            echo "web=$web"
+            echo "api=$api"
+            echo "agent=$agent"
+            echo "sync_only=$sync_only"
+          } >> "$GITHUB_OUTPUT"
+
+  # 静态资源镜像（apps/h5）→ ghcr.io/<owner>/mealmind-web
+  web:
+    name: web 构建与推送
+    needs: prepare
+    if: needs.prepare.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: 计算镜像前缀（GHCR 要求 owner 全小写）
+        id: meta
+        run: |
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          echo "prefix=ghcr.io/${owner}/mealmind" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/h5/package-lock.json
+      - name: 检查（npm ci + lint + build）
+        working-directory: apps/h5
+        run: npm ci && npm run lint && npm run build
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/h5
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.prefix }}-web:latest
+            ${{ steps.meta.outputs.prefix }}-web:${{ github.sha }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+  # 业务服务镜像（services/biz）→ ghcr.io/<owner>/mealmind-api
+  api:
+    name: api 构建与推送
+    needs: prepare
+    if: needs.prepare.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: 计算镜像前缀（GHCR 要求 owner 全小写）
+        id: meta
+        run: |
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          echo "prefix=ghcr.io/${owner}/mealmind" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+          cache-dependency-path: services/biz/pom.xml
+      - name: 检查（mvn package，暂无单测）
+        working-directory: services/biz
+        run: mvn -B package
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/biz
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.prefix }}-api:latest
+            ${{ steps.meta.outputs.prefix }}-api:${{ github.sha }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+  # Agent 运行时镜像（services/agent）→ ghcr.io/<owner>/mealmind-agent
+  agent:
+    name: agent 构建与推送
+    needs: prepare
+    if: needs.prepare.outputs.agent == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: 计算镜像前缀（GHCR 要求 owner 全小写）
+        id: meta
+        run: |
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          echo "prefix=ghcr.io/${owner}/mealmind" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 检查（语法编译，暂无 pytest）
+        working-directory: services/agent
+        run: python -m compileall app
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/agent
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.prefix }}-agent:latest
+            ${{ steps.meta.outputs.prefix }}-agent:${{ github.sha }}
+          cache-from: type=gha,scope=agent
+          cache-to: type=gha,scope=agent,mode=max
+
+  # 部署：同步 deploy 资产 + 逐个服务拉取重启（--no-deps 不触碰其它服务与基础设施）
+  deploy:
+    name: 部署到服务器
+    needs: [prepare, web, api, agent]
+    # 构建侧全成功（或按变更被跳过）才发布；任一失败则整体停下
+    if: >-
+      always() && !cancelled() && !failure()
+      && needs.prepare.result == 'success'
+      && (needs.prepare.outputs.web == 'true' || needs.prepare.outputs.api == 'true'
+      || needs.prepare.outputs.agent == 'true' || needs.prepare.outputs.sync_only == 'true')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: 准备 SSH 环境
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: 同步部署资产（compose / sql / nginx 配置，.env 不覆盖）
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          rsync -az --delete --exclude .env \
+            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+            deploy/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/deploy/"
+      - name: 部署 mealmind-web
+        if: needs.prepare.outputs.web == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd $DEPLOY_PATH \
+             && docker compose --env-file deploy/.env -f deploy/compose.yml pull mealmind-web \
+             && docker compose --env-file deploy/.env -f deploy/compose.yml up -d --no-deps --wait mealmind-web"
+      - name: 部署 mealmind-api
+        if: needs.prepare.outputs.api == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd $DEPLOY_PATH \
+             && docker compose --env-file deploy/.env -f deploy/compose.yml pull mealmind-api \
+             && docker compose --env-file deploy/.env -f deploy/compose.yml up -d --no-deps --wait mealmind-api"
+      - name: 部署 mealmind-agent
+        if: needs.prepare.outputs.agent == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd $DEPLOY_PATH \
+             && docker compose --env-file deploy/.env -f deploy/compose.yml pull mealmind-agent \
+             && docker compose --env-file deploy/.env -f deploy/compose.yml up -d --no-deps --wait mealmind-agent"
+      - name: 应用 compose 变更（仅同步模式：不 pull、不重建镜像）
+        if: needs.prepare.outputs.sync_only == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd $DEPLOY_PATH \
+             && docker compose --env-file deploy/.env -f deploy/compose.yml up -d --wait"
