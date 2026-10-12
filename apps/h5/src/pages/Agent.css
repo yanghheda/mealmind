@@ -642,32 +642,3 @@
   flex: none;
   color: var(--c-primary);
 }
-.app--agent .pref-undo {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  padding: 8px 10px;
-  border: 1px solid rgba(255, 80, 0, 0.18);
-  border-radius: 10px;
-  background: var(--c-pink-tint);
-  font-size: 12px;
-  color: #c2410c;
-  animation: fadeUp 0.24s ease both;
-}
-.app--agent .pref-undo > svg {
-  flex: none;
-}
-.app--agent .pref-undo .txt {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.app--agent .pref-undo .undo-btn {
-  flex: none;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--c-primary);
-}

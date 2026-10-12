@@ -254,6 +254,7 @@ Rubric 仓库：档位定义以 YAML 文件维护，带版本号；运行时加�
 | 20  | GET    | `/api/eval/badcases`               | badcase 列表               | 是   |
 | 21  | GET    | `/api/search`                      | 关键字搜索（商家 / 菜品）  | 是   |
 | 22  | GET    | `/api/eval/cost-summary`           | 单次决策成本摘要（看板）   | 是   |
+| 23  | GET    | `/api/agent/runs`                  | 会话历史（重进水合消息流） | 是   |
 
 内部接口（仅业务服务可调，走内网，用服务间令牌鉴权）：
 
@@ -324,7 +325,6 @@ Rubric 仓库：档位定义以 YAML 文件维护，带版本号；运行时加�
 | `scoring`          | 打分批次进度                 | `done`、`total`、`mode`（`DECISION` / `RULE` / `MIXED`）                                                                      |
 | `card`             | 单菜打分完成                 | `card`（名称、商家、价格、综合分、五维分、置信度、模式标记）                                                             |
 | `reason.delta`     | 理由流式增量                 | `dishId`、`text`                                                                                                         |
-| `preference.saved` | 偏好自动沉淀新写或升级（M4 W1） | `items[]`（`id` / `type` / `content`）、`promoted`（是否由观察中升级为启用）                                             |
 | `usage`            | 链路收尾的用量与阶段耗时（M4 W5） | `inputTokens`、`outputTokens`、`decisionCalls`、`estimated`、`understandMs`、`scoreMs`、`phraseMs`、`filterWaitMs`         |
 | `done`             | 全部完成                     | `cards[]`（最终排序）、`latencyMs`、`costYuan`、`costBreakdown`（token 与决策模型调用数）、`rubricVersion`、`degradeLevel`  |
 | `degraded`         | 触发降级                     | `level`（`PARTIAL` / `FULL`）、`reason`                                                                                  |
@@ -349,6 +349,17 @@ Rubric 仓库：档位定义以 YAML 文件维护，带版本号；运行时加�
 | Success   | `200`；`data: RefineResponse`——`REFINE` → `{ runId（新）, streamUrl, cards: null, hasMore: null }`；`NEXT_BATCH` → `{ runId（原）, streamUrl: null, cards[], hasMore }` |
 | Error     | `404 RUN_NOT_FOUND`、`409 RUN_NOT_DONE`（父 run 未完成）、`400 EMPTY_TEXT` / `TEXT_TOO_LONG` / `INVALID_PARAM`、`429 TOO_MANY_RUNS` |
 | 说明      | `REFINE` 新建继承 run（落 `parent_run_id`，继承原 run 的 mode / merchantId 与带入偏好；文本 = 原话 + 修正），走完整理解与 SSE，未受影响菜品的打分自然复用缓存；`NEXT_BATCH` 同 run 直接读已落库候选重建卡片（排除 `excludeDishIds`、按 `rank_no` 取下一组），零模型成本、无 SSE 秒回，`hasMore=false` 表示候选已看完。**`NEXT_BATCH` 自 2026-10-13 起前端已不再调用**（结果改为横向滑动浏览全部 ≤5 张候选，取消「换一批」按钮），接口与参数保留仅为向后兼容，无新功能依赖 |
+
+**接口 23 · 会话历史（重进水合）**
+
+| 字段           | 值                                                                                                                                                                                                                                          |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operation      | `GET /api/agent/runs?limit=3`                                                                                                                                                                                                              |
+| Auth           | `X-Session-Id`                                                                                                                                                                                                                              |
+| Query          | `limit`（可选，默认 3、上限 20，取最近 N 轮；默认 3 轮兼顾上下文与首屏渲染负担）                                                                                                                                                            |
+| Success        | `200`；`data: { items: RunHistoryItem[] }`，按 `created_at` 升序（旧 → 新）                                                                                                                                                                 |
+| RunHistoryItem | `runId, inputText, mode, merchantId, status, degradeLevel, latencyMs, parentRunId, clarifyState, clarify, profile, filtered, appliedPreferences[], cards[]`；未产出阶段的字段为 null / 空列表，口径对齐接口 17                                                                                                    |
+| 说明           | 前端进入会话页时调用，把最近轮次水合成消息流（含结果卡片与理由、五维分）；`status = RUNNING` 的轮次由前端续订 SSE（接口 16）接上进度，`clarifyState = PENDING` 的恢复追问卡可继续作答，`FAILED` 以错误块展示可重试。`filtered.poolSize` 未落库，由 `candidate_count` 与 `filtered_detail` 按约束计数口径回推（扣除被放宽的 `overBudget` 避免重复计数） |
 
 **接口 I1c · 澄清回答回填（协作式编排的续接调用）**
 
@@ -428,6 +439,8 @@ M4 增量列（`preference.seen_count` / `last_seen_run_id`、`decision_run.appl
 | last_active_at | datetime    | NOT NULL | 最后活跃时间         |
 | status         | varchar(16) | NOT NULL | `ACTIVE` / `REVOKED` |
 
+退出登录（接口 3）置 `REVOKED`，并级联删除该会话的购物车条目、偏好与决策记录（先删 `decision_candidate` / `decision_score`，再删 `decision_run`），对齐 PRD「会话记录随退出清除」。
+
 **dish（菜品）**
 
 | 字段          | 类型          | 约束         | 说明                                        |
@@ -500,7 +513,7 @@ M4 增量列（`preference.seen_count` / `last_seen_run_id`、`decision_run.appl
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | merchant         | `id, name, logo_url, rating, monthly_sales, delivery_minutes, distance_meters, min_order_amount, delivery_fee, is_open, notice, rank_label` | 商家；`is_open` 供营业状态约束使用                                         |
 | merchant_tag     | `merchant_id, tag, tag_type`                                                                                                                | 商家标签，`tag_type` 区分营销标签与特色标签                                |
-| preference       | `id, session_id, type, content, source, status, seen_count, last_seen_run_id`                                                                                             | 偏好记忆；`type` ∈ 口味 / 预算 / 忌口 / 场景，`source` ∈ `AUTO` / `MANUAL`；`status` ∈ `ACTIVE` / `PENDING`（观察中）/ `IGNORED`（墓碑软删，可手动恢复，不物理删除）；`seen_count` 为跨 run 观测次数（口味 / 预算 / 场景在两个不同 run 重复出现才升级 `ACTIVE`，`last_seen_run_id` 防同 run 重复计数，M4 W1） |
+| preference       | `id, session_id, type, content, source, status, seen_count, last_seen_run_id`                                                                                             | 偏好记忆；`type` ∈ 口味 / 预算 / 忌口 / 场景；偏好仅由「我的」页手动写入（`source` 恒为 `MANUAL`，`status` ∈ `ACTIVE` / `IGNORED` 墓碑软删）。`seen_count` / `last_seen_run_id` 为 M4 W1 自动沉淀遗留列，自动沉淀已下线，字段保留不再写入 |
 | cart_item        | `id, session_id, dish_id, spec_text, spec_hash, quantity, unit_price`                                                                       | 购物车条目；`spec_hash` 用于「菜品 + 规格」唯一性判定                      |
 | dish_tag         | `dish_id, tag, tag_type`                                                                                                                    | 菜品标签，承载辣度、口味、食材、健康等维度，是约束与打分的主要输入         |
 | dish_spec_group  | `id, dish_id, group_name, is_required, sort_no`                                                                                             | 规格分组（份量、加料）                                                     |
@@ -548,7 +561,7 @@ M4 增量列（`preference.seen_count` / `last_seen_run_id`、`decision_run.appl
 
 | 对象               | 索引 / 键                                                                | 理由                             |
 | ------------------ | ------------------------------------------------------------------------ | -------------------------------- |
-| decision_run       | `idx_session_created (session_id, created_at)`                           | 按会话查最近一次结果（断线恢复） |
+| decision_run       | `idx_session_created (session_id, created_at)`                           | 按会话查最近结果（断线恢复）与会话历史（接口 23 取最近 N 轮） |
 | decision_candidate | `idx_run_rank (run_id, rank_no)`                                         | 结果页按名次取                   |
 | decision_score     | `idx_run_dish (run_id, dish_id)`                                         | 评测按维度聚合                   |
 | dish               | `idx_merchant_cat (merchant_id, category_id)`                            | 菜单页与候选筛选                 |
@@ -584,7 +597,7 @@ graph TD
 
 读取方式：实线是正常路径，虚线是降级路径。追问形成一次回环，由「最多 2 问」的计数器约束，不会无限循环；打分节点内部按菜品粒度重试，单菜失败不影响整批（§6.2）。每个节点都有明确失败出口：理解失败走规则解析、打分失败转规则分、理由失败转模板。LangGraph 的 checkpointer 在本项目关闭——一次决策是有界执行，run 状态由业务服务写入 MySQL 并同步 Redis 进度流（§5.3），让断线恢复的 seq 口径只有一个来源。
 
-图的执行是协作式的：业务服务经 I1 建立 SSE 流后，图在「筛选候选」节点暂停，业务服务执行约束引擎并通过 I1b 回填候选，图从该点继续；图中标注「业务服务」的加权排序同样由业务服务在收流过程中完成。事件只有一个出口：Agent 产出 `understand` / `clarify` / `clarify.resolved` / `scoring` / `card` / `reason.delta` / `usage`，业务服务在转发前后补上 `filtered`（掌握过滤明细）、`done`（掌握加权公式、并列判定与落库口径）、`preference.saved`（掌握偏好写入口径）与 `error` / `degraded`，`seq` 由业务服务统一编号。这样「模型负责语义、代码负责确定性与账本」的边界落实在事件层，而不是停留在分工描述上 [Expert judgment]。
+图的执行是协作式的：业务服务经 I1 建立 SSE 流后，图在「筛选候选」节点暂停，业务服务执行约束引擎并通过 I1b 回填候选，图从该点继续；图中标注「业务服务」的加权排序同样由业务服务在收流过程中完成。事件只有一个出口：Agent 产出 `understand` / `clarify` / `clarify.resolved` / `scoring` / `card` / `reason.delta` / `usage`，业务服务在转发前后补上 `filtered`（掌握过滤明细）、`done`（掌握加权公式、并列判定与落库口径）与 `error` / `degraded`，`seq` 由业务服务统一编号。这样「模型负责语义、代码负责确定性与账本」的边界落实在事件层，而不是停留在分工描述上 [Expert judgment]。
 
 ### 6.1 降级状态机
 

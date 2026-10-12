@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -42,6 +43,8 @@ import com.mealmind.biz.dto.FilteredView;
 import com.mealmind.biz.dto.RelaxOption;
 import com.mealmind.biz.dto.RefineRequest;
 import com.mealmind.biz.dto.RefineResponse;
+import com.mealmind.biz.dto.RunHistoryItem;
+import com.mealmind.biz.dto.RunHistoryResponse;
 import com.mealmind.biz.dto.RunSnapshotResponse;
 import com.mealmind.biz.dto.SpecGroupView;
 import com.mealmind.biz.dto.SpecOptionView;
@@ -211,7 +214,7 @@ public class DecisionService {
         runMapper.insert(run);
 
         runHub.create(runId);
-        executor.submit(() -> executeRun(runId, sessionId, agentText, mode, merchantId, appliedPrefs, null));
+        executor.submit(() -> executeRun(runId, agentText, mode, merchantId, appliedPrefs, null));
         return new CreateRunResponse(runId, streamUrl(runId));
     }
 
@@ -284,6 +287,89 @@ public class DecisionService {
     private JsonNode clarifyPayload(DecisionRun run) {
         String json = run.getClarifyJson();
         return json == null || json.isBlank() ? null : readJson(json);
+    }
+
+    // ------------------------------------------------------------------ 接口 23
+
+    /** 会话历史（接口 23）：取本会话最近 N 轮决策，按创建时间升序返回，供重进水合消息流。 */
+    public RunHistoryResponse history(int limit) {
+        int capped = Math.max(1, Math.min(20, limit));
+        List<DecisionRun> runs = runMapper.selectList(new QueryWrapper<DecisionRun>()
+                .eq("session_id", SessionContext.sessionId())
+                .orderByDesc("created_at")
+                .last("limit " + capped));
+        Collections.reverse(runs);
+        List<RunHistoryItem> items = new ArrayList<>(runs.size());
+        for (DecisionRun run : runs) {
+            items.add(toHistoryItem(run));
+        }
+        return new RunHistoryResponse(items);
+    }
+
+    private RunHistoryItem toHistoryItem(DecisionRun run) {
+        List<DecisionCandidate> candidates = candidateMapper.selectList(new QueryWrapper<DecisionCandidate>()
+                .eq("run_id", run.getId())
+                .orderByAsc("rank_no"));
+        return new RunHistoryItem(
+                run.getId(),
+                run.getInputText(),
+                run.getMode(),
+                run.getMerchantId(),
+                run.getStatus(),
+                run.getDegradeLevel(),
+                run.getLatencyMs(),
+                run.getParentRunId(),
+                run.getClarifyState(),
+                clarifyPayload(run),
+                historyProfile(run),
+                historyFiltered(run),
+                historyAppliedPreferences(run),
+                rebuildCards(run, candidates));
+    }
+
+    /** 未产出理解的 run（profileJson 为初始空对象）返回 null，避免前端渲染空 profile。 */
+    private JsonNode historyProfile(DecisionRun run) {
+        JsonNode profile = readJson(run.getProfileJson());
+        return profile.isObject() && !profile.isEmpty() ? profile : null;
+    }
+
+    /**
+     * filtered 事件重建：各约束命中数已落库，poolSize 未落库，按约束引擎计数口径回推
+     * （budget 含被放宽的 overBudget 候选，回推时需扣除避免重复计数）。
+     */
+    private FilteredView historyFiltered(DecisionRun run) {
+        JsonNode detail = readJson(run.getFilteredDetail());
+        if (!detail.isObject() || detail.isEmpty()) {
+            return null;
+        }
+        int candidateCount = run.getCandidateCount() == null ? 0 : run.getCandidateCount();
+        int budgetNet = Math.max(0, detail.path("budget").asInt() - detail.path("overBudget").asInt());
+        int poolSize = candidateCount
+                + detail.path("closed").asInt()
+                + detail.path("unavailable").asInt()
+                + budgetNet
+                + detail.path("avoid").asInt()
+                + detail.path("timeliness").asInt()
+                + detail.path("capped").asInt();
+        return new FilteredView(candidateCount, poolSize, detail);
+    }
+
+    /** 带入偏好载荷重建：按落库 id 顺序取行（含已墓碑化的行，保证历史 chip 原样回显）。 */
+    private List<Map<String, Object>> historyAppliedPreferences(DecisionRun run) {
+        JsonNode ids = readJson(run.getAppliedPreferenceIds());
+        if (!ids.isArray() || ids.isEmpty()) {
+            return List.of();
+        }
+        List<String> ordered = new ArrayList<>(ids.size());
+        for (JsonNode id : ids) {
+            ordered.add(id.asText());
+        }
+        Map<String, Preference> byId = new HashMap<>();
+        for (Preference row : preferenceService.selectByIds(ordered)) {
+            byId.put(row.getId(), row);
+        }
+        return preferenceService.appliedPayload(
+                ordered.stream().map(byId::get).filter(java.util.Objects::nonNull).toList());
     }
 
     // ------------------------------------------------------------------ M4 W2 澄清
@@ -385,7 +471,7 @@ public class DecisionService {
 
         runHub.create(runId);
         DecisionProfile parentProfile = toProfile(readJson(parent.getProfileJson()));
-        executor.submit(() -> executeRun(runId, parent.getSessionId(), agentText, parent.getMode(),
+        executor.submit(() -> executeRun(runId, agentText, parent.getMode(),
                 parent.getMerchantId(), appliedPrefs, parentProfile));
         return new RefineResponse(runId, streamUrl(runId), null, null);
     }
@@ -414,7 +500,7 @@ public class DecisionService {
 
     // ------------------------------------------------------------------ 编排执行
 
-    private void executeRun(String runId, String sessionId, String text, String mode, String merchantId,
+    private void executeRun(String runId, String text, String mode, String merchantId,
                             List<Preference> appliedPrefs, DecisionProfile parentProfile) {
         RunStream stream = runHub.get(runId);
         if (stream == null) {
@@ -443,7 +529,7 @@ public class DecisionService {
         try (InputStream body = agentClient.decide(runId, text, mode, merchantId)) {
             agentClient.readEvents(body, event -> {
                 switch (event.name()) {
-                    case "understand" -> handleUnderstand(runId, sessionId, stream, event, appliedPrefs, profileRef, startFilter,
+                    case "understand" -> handleUnderstand(runId, stream, event, appliedPrefs, profileRef, startFilter,
                             parentProfile);
                     case "clarify" -> {
                         // 落库待答问题并换档：整轮超时 = 原超时 + 澄清等待窗口（用户思考不占用打分预算）
@@ -539,7 +625,7 @@ public class DecisionService {
         }
     }
 
-    private void handleUnderstand(String runId, String sessionId, RunStream stream, AgentClient.AgentEvent event,
+    private void handleUnderstand(String runId, RunStream stream, AgentClient.AgentEvent event,
                                   List<Preference> appliedPrefs,
                                   AtomicReference<DecisionProfile> profileRef,
                                   Runnable startFilter,
@@ -554,11 +640,7 @@ public class DecisionService {
                 fingerprint);
         stream.emit("understand", withAppliedPreferences(withProfile(data, profile), appliedPrefs));
 
-        // 自动沉淀（PRD 4.8）：忌口立即记忆、口味/预算/场景跨 run 重复才记忆；命中新写/升级时下发可撤销提示
-        PreferenceService.ObserveResult observed = preferenceService.observe(sessionId, runId, profile, appliedPrefs);
-        if (!observed.items().isEmpty()) {
-            stream.emit("preference.saved", Map.of("items", observed.items(), "promoted", observed.promoted()));
-        }
+        // 偏好仅由用户在「我的」页手动添加（PRD 4.8）：会话理解结果不再自动沉淀偏好
 
         // 澄清门控（W2）：首答含疑问时只转发不执行过滤，避免 profile 在用户回答前被用于过滤与打分
         if (data.path("questions").size() > 0) {

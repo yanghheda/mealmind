@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -10,7 +10,6 @@ import { fetchMerchant } from '../api/merchants'
 import { addCartItem } from '../api/cart'
 import {
   PREFERENCE_QUERY_KEY,
-  deletePreference,
   fetchPreferences,
   preferenceLabel,
 } from '../api/preferences'
@@ -25,7 +24,6 @@ import type {
   ClarifyEvent,
   DecisionCard,
   DimScore,
-  PreferenceSavedEvent,
   RunProfile,
 } from '../api/agent'
 import type { AddCartItemRequest, DishView } from '../api/types'
@@ -61,22 +59,12 @@ export function Agent() {
   const [input, setInput] = useState('')
   /** 被用户点 x 移除的长期偏好：仅影响下一轮（MVP 不重发当前 run）。 */
   const [excludedPrefIds, setExcludedPrefIds] = useState<string[]>([])
-  const [savedNotice, setSavedNotice] = useState<PreferenceSavedEvent | null>(null)
   const [specDish, setSpecDish] = useState<DishView | null>(null)
   const sourceRef = useRef<HTMLElement | null>(null)
-
-  const handlePreferenceSaved = useCallback(
-    (event: PreferenceSavedEvent) => {
-      setSavedNotice(event)
-      void queryClient.invalidateQueries({ queryKey: PREFERENCE_QUERY_KEY })
-    },
-    [queryClient],
-  )
 
   const { blocks, busy, submit, answer, refine, reset } = useAgentSession(
     merchantId ? 'MERCHANT' : 'GLOBAL',
     merchantId,
-    { onPreferenceSaved: handlePreferenceSaved },
   )
 
   const prefsQuery = useQuery({ queryKey: PREFERENCE_QUERY_KEY, queryFn: fetchPreferences })
@@ -103,12 +91,6 @@ export function Agent() {
     })
   }, [blocks, busy])
 
-  useEffect(() => {
-    if (!savedNotice) return
-    const timer = window.setTimeout(() => setSavedNotice(null), 6000)
-    return () => window.clearTimeout(timer)
-  }, [savedNotice])
-
   const back = () => {
     if (window.history.length > 1) navigate(-1)
     else navigate('/home')
@@ -120,22 +102,6 @@ export function Agent() {
     // 偏好列表就绪时显式传当前未排除的 id（空数组 = 本轮全部不带入）；未就绪则不传，由后端默认全选 ACTIVE
     submit(trimmed, prefsQuery.isSuccess ? memoryItems.map((item) => item.id) : undefined)
     setInput('')
-  }
-
-  const undoSaved = () => {
-    const items = savedNotice?.items ?? []
-    setSavedNotice(null)
-    void (async () => {
-      for (const item of items) {
-        try {
-          await deletePreference(item.id)
-        } catch {
-          // 单条撤销失败不阻塞其余条目
-        }
-      }
-      void queryClient.invalidateQueries({ queryKey: PREFERENCE_QUERY_KEY })
-      showToast('已撤销记忆')
-    })()
   }
 
   const handleAdd = (card: DecisionCard, event: MouseEvent<HTMLButtonElement>) => {
@@ -212,18 +178,6 @@ export function Agent() {
       </main>
 
       <div className="agent-inputbar">
-        {savedNotice && savedNotice.items.length > 0 && (
-          <div className="pref-undo">
-            <Icon name="sparkles" size={13} />
-            <span className="txt">
-              {savedNotice.promoted ? '已记住为长期偏好：' : '已记住：'}
-              {savedNotice.items.map((item) => preferenceLabel(item)).join('、')}
-            </span>
-            <button className="undo-btn" type="button" onClick={undoSaved}>
-              撤销
-            </button>
-          </div>
-        )}
         {memoryItems.length > 0 && (
           <div className="chips-scroll memory-bar">
             <span className="memory-label">

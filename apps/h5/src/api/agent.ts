@@ -1,6 +1,6 @@
 import { apiFetch } from './client'
 import { clearSessionLocal, getSessionId } from '../store/session'
-import type { AppliedPreference, PreferenceView } from './preferences'
+import type { AppliedPreference } from './preferences'
 import type { SpecGroupView } from './types'
 
 /* ---------------- 决策：请求与响应 ---------------- */
@@ -112,12 +112,6 @@ export interface UnderstandEvent {
   clarifyResolved?: boolean
 }
 
-/** preference.saved 事件：本次新写/升级的偏好（promoted 表示由 PENDING 升级为 ACTIVE）。 */
-export interface PreferenceSavedEvent {
-  items: PreferenceView[]
-  promoted: boolean
-}
-
 export interface RelaxOption {
   type: string
   label: string
@@ -164,6 +158,28 @@ export interface RunSnapshot {
   clarifyState: 'PENDING' | 'ANSWERED' | 'SKIPPED' | null
 }
 
+/** 会话历史单条（接口 23）：重进会话页时水合消息流的整轮还原视图。 */
+export interface RunHistoryItem {
+  runId: string
+  inputText: string
+  mode: 'GLOBAL' | 'MERCHANT'
+  merchantId: string | null
+  status: string
+  degradeLevel: DegradeLevel
+  latencyMs: number | null
+  /** REFINE 继承来源 run；非空表示该轮由「继续调整」发起。 */
+  parentRunId: string | null
+  clarifyState: 'PENDING' | 'ANSWERED' | 'SKIPPED' | null
+  /** 待答澄清问题；未追问为 null。 */
+  clarify: ClarifyEvent | null
+  /** 结构化理解结果；未产出理解时为 null。 */
+  profile: RunProfile | null
+  /** filtered 事件视图；未过滤时为 null。 */
+  filtered: FilteredEvent | null
+  appliedPreferences: AppliedPreference[]
+  cards: DecisionCard[]
+}
+
 export interface CreateRunRequest {
   text: string
   mode?: 'GLOBAL' | 'MERCHANT'
@@ -180,6 +196,11 @@ export function createRun(request: CreateRunRequest): Promise<{ runId: string; s
 /** GET /api/agent/runs/{runId} —— 拉取快照（断线恢复对齐）。 */
 export function fetchRunSnapshot(runId: string): Promise<RunSnapshot> {
   return apiFetch(`/agent/runs/${encodeURIComponent(runId)}`)
+}
+
+/** GET /api/agent/runs —— 接口 23：会话历史（时间升序，最近 N 轮），重进水合消息流。 */
+export function fetchRunHistory(limit = 3): Promise<{ items: RunHistoryItem[] }> {
+  return apiFetch(`/agent/runs?limit=${limit}`)
 }
 
 /** POST /api/agent/runs/{runId}/answers —— 提交澄清回答或整轮跳过（W2；问题失效返回 409）。 */

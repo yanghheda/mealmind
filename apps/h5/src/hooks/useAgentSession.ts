@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { answerClarify, createRun, fetchRunSnapshot, openRunStream, refineRun } from '../api/agent'
+import {
+  answerClarify,
+  createRun,
+  fetchRunHistory,
+  fetchRunSnapshot,
+  openRunStream,
+  refineRun,
+} from '../api/agent'
 import type {
   ClarifyAnswer,
   ClarifyEvent,
@@ -8,7 +15,7 @@ import type {
   DoneEvent,
   ErrorEvent,
   FilteredEvent,
-  PreferenceSavedEvent,
+  RunHistoryItem,
   RunProfile,
   RelaxOption,
   ScoringEvent,
@@ -97,15 +104,47 @@ function initialBlock(id: string, text: string, refined = false): RunBlock {
   }
 }
 
+/** 历史轮次 → 展示块（接口 23）：DONE/DEGRADED 落结果态；RUNNING 保留进度态待流续订；其余落失败态。 */
+function historyBlock(item: RunHistoryItem): RunBlock {
+  const done = item.status === 'DONE' || item.status === 'DEGRADED'
+  const running = item.status === 'RUNNING'
+  return {
+    id: `h-${item.runId}`,
+    runId: item.runId,
+    text: item.inputText,
+    phase: done ? 'done' : running ? 'running' : 'error',
+    steps: done
+      ? initialSteps().map((step) => ({ ...step, status: 'done' as const }))
+      : initialSteps(),
+    profile: item.profile,
+    fromFallback: false,
+    appliedPreferences: item.appliedPreferences ?? [],
+    // 仅仍待答的追问还原为可作答卡；已收口（ANSWERED / SKIPPED）的不再展示
+    clarify: running && item.clarifyState === 'PENDING' ? item.clarify : null,
+    degradeLevel: item.degradeLevel ?? 'NORMAL',
+    filtered: item.filtered,
+    scoring: null,
+    cards: done ? item.cards ?? [] : [],
+    reasons: {},
+    error:
+      !done && !running
+        ? { code: 'RUN_INTERRUPTED', message: '这一轮没有完成，可以重试', retryable: true }
+        : null,
+    relaxOptions: [],
+    refined: Boolean(item.parentRunId),
+    latencyMs: item.latencyMs,
+  }
+}
+
 /**
  * AI 决策会话状态机：一句话 → 进度步骤 → 带分卡片。
  * 事件驱动：SSE 事件与 LangGraph 节点边界一一对应；
- * 流异常结束时以快照兜底对齐（断线恢复口径）。
+ * 流异常结束时以快照兜底对齐（断线恢复口径）；
+ * 进入页面先按会话历史水合（接口 23），刷新 / 切页重进后多轮记录仍在。
  */
 export function useAgentSession(
   mode?: 'GLOBAL' | 'MERCHANT',
   merchantId?: string,
-  options?: { onPreferenceSaved?: (event: PreferenceSavedEvent) => void },
 ) {
   const [blocks, setBlocks] = useState<RunBlock[]>([])
   const aborts = useRef(new Map<string, () => void>())
@@ -116,11 +155,6 @@ export function useAgentSession(
   const resumed = useRef(new Set<string>())
   /** 指向最新的 recover（subscribe 的关闭/异常回调需要它，避免与 recover 循环依赖）。 */
   const recoverRef = useRef<(blockId: string, runId: string) => void>(() => {})
-  const savedHandler = useRef(options?.onPreferenceSaved)
-
-  useEffect(() => {
-    savedHandler.current = options?.onPreferenceSaved
-  }, [options?.onPreferenceSaved])
 
   const patch = useCallback((blockId: string, update: (block: RunBlock) => RunBlock) => {
     setBlocks((prev) =>
@@ -159,10 +193,6 @@ export function useAgentSession(
         }
         case 'clarify.resolved': {
           patch(blockId, (block) => ({ ...block, clarify: null }))
-          break
-        }
-        case 'preference.saved': {
-          savedHandler.current?.(data as PreferenceSavedEvent)
           break
         }
         case 'filtered': {
@@ -315,6 +345,37 @@ export function useAgentSession(
       void recover(blockId, runId)
     }
   }, [recover])
+
+  /**
+   * 会话历史水合（接口 23）：进入页面恢复历史轮次（时间升序置前），
+   * 在途 run 续订流（追问等待中的借此恢复作答入口）；拉取失败静默，不影响新会话发起。
+   */
+  const hydrated = useRef(false)
+  useEffect(() => {
+    if (hydrated.current) return
+    hydrated.current = true
+    fetchRunHistory()
+      .then(({ items }) => {
+        if (items.length === 0) return
+        const restored = items.map(historyBlock)
+        for (const block of restored) {
+          phases.current.set(block.id, block.phase)
+          if (block.runId) runIds.current.set(block.id, block.runId)
+        }
+        setBlocks((prev) => {
+          const known = new Set(prev.map((block) => block.id))
+          return [...restored.filter((block) => !known.has(block.id)), ...prev]
+        })
+        for (const item of items) {
+          if (item.status === 'RUNNING') {
+            subscribe(`h-${item.runId}`, item.runId)
+          }
+        }
+      })
+      .catch(() => {
+        // 历史拉取失败静默：会话仍可从欢迎态正常发起
+      })
+  }, [subscribe])
 
   const submit = useCallback(
     (text: string, preferenceIds?: string[]) => {

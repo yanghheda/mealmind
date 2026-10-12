@@ -9,6 +9,7 @@ import com.mealmind.biz.dto.CreateRunRequest;
 import com.mealmind.biz.dto.CreateRunResponse;
 import com.mealmind.biz.dto.RefineRequest;
 import com.mealmind.biz.dto.RefineResponse;
+import com.mealmind.biz.dto.RunHistoryResponse;
 import com.mealmind.biz.dto.RunSnapshotResponse;
 
 import org.springframework.http.MediaType;
@@ -18,11 +19,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * 决策接口（技术方案 §4.1 接口 15/16/17/18）。
+ * 决策接口（技术方案 §4.1 接口 15/16/17/18/23）。
  */
 @RestController
 @RequestMapping("/api/agent")
@@ -38,6 +40,13 @@ public class AgentController {
     @PostMapping("/runs")
     public ApiResponse<CreateRunResponse> createRun(@RequestBody CreateRunRequest request) {
         return ApiResponse.ok(decisionService.createRun(request));
+    }
+
+    /** 接口 23：会话历史（最近 N 轮，时间升序，默认 3、上限 20），重进会话页时水合消息流。 */
+    @GetMapping("/runs")
+    public ApiResponse<RunHistoryResponse> history(
+            @RequestParam(value = "limit", defaultValue = "3") int limit) {
+        return ApiResponse.ok(decisionService.history(limit));
     }
 
     /** 接口 16：SSE 订阅决策进度；断线重连带 Last-Event-ID 按 seq 补发。 */

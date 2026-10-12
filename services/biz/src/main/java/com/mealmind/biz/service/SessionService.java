@@ -1,6 +1,7 @@
 package com.mealmind.biz.service;
 
 import java.security.SecureRandom;
+import java.util.List;
 import java.util.UUID;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -11,8 +12,14 @@ import com.mealmind.biz.config.AppProperties;
 import com.mealmind.biz.dto.SessionGuestResponse;
 import com.mealmind.biz.dto.SessionMeResponse;
 import com.mealmind.biz.entity.CartItem;
+import com.mealmind.biz.entity.DecisionCandidate;
+import com.mealmind.biz.entity.DecisionRun;
+import com.mealmind.biz.entity.DecisionScore;
 import com.mealmind.biz.entity.VisitorSession;
 import com.mealmind.biz.mapper.CartItemMapper;
+import com.mealmind.biz.mapper.DecisionCandidateMapper;
+import com.mealmind.biz.mapper.DecisionRunMapper;
+import com.mealmind.biz.mapper.DecisionScoreMapper;
 import com.mealmind.biz.mapper.PreferenceMapper;
 import com.mealmind.biz.mapper.VisitorSessionMapper;
 import com.mealmind.biz.session.SessionContext;
@@ -36,16 +43,25 @@ public class SessionService {
     private final VisitorSessionMapper visitorSessionMapper;
     private final CartItemMapper cartItemMapper;
     private final PreferenceMapper preferenceMapper;
+    private final DecisionRunMapper decisionRunMapper;
+    private final DecisionCandidateMapper decisionCandidateMapper;
+    private final DecisionScoreMapper decisionScoreMapper;
     private final AppProperties properties;
     private final SecureRandom random = new SecureRandom();
 
     public SessionService(VisitorSessionMapper visitorSessionMapper,
                           CartItemMapper cartItemMapper,
                           PreferenceMapper preferenceMapper,
+                          DecisionRunMapper decisionRunMapper,
+                          DecisionCandidateMapper decisionCandidateMapper,
+                          DecisionScoreMapper decisionScoreMapper,
                           AppProperties properties) {
         this.visitorSessionMapper = visitorSessionMapper;
         this.cartItemMapper = cartItemMapper;
         this.preferenceMapper = preferenceMapper;
+        this.decisionRunMapper = decisionRunMapper;
+        this.decisionCandidateMapper = decisionCandidateMapper;
+        this.decisionScoreMapper = decisionScoreMapper;
         this.properties = properties;
     }
 
@@ -83,17 +99,33 @@ public class SessionService {
                 session.getCreatedAt(), session.getLastActiveAt(), session.getStatus());
     }
 
-    /** 接口 3：退出登录，置 REVOKED 并清空该会话的购物车与偏好。 */
+    /** 接口 3：退出登录，置 REVOKED 并清空该会话的购物车、偏好与决策记录。 */
     @Transactional
     public void revoke() {
         String sessionId = SessionContext.sessionId();
         cartItemMapper.delete(new QueryWrapper<CartItem>().eq("session_id", sessionId));
         preferenceMapper.deleteBySessionId(sessionId);
+        clearDecisionHistory(sessionId);
         visitorSessionMapper.update(null,
                 new UpdateWrapper<VisitorSession>()
                         .eq("id", sessionId)
                         .set("status", STATUS_REVOKED)
                         .set("last_active_at", java.time.LocalDateTime.now()));
+    }
+
+    /** 决策记录级联清除（PRD §4.1：会话记录随退出清除）：先删候选与维度分，再删 run。 */
+    private void clearDecisionHistory(String sessionId) {
+        List<String> runIds = decisionRunMapper.selectList(new QueryWrapper<DecisionRun>()
+                        .select("id")
+                        .eq("session_id", sessionId)).stream()
+                .map(DecisionRun::getId)
+                .toList();
+        if (runIds.isEmpty()) {
+            return;
+        }
+        decisionCandidateMapper.delete(new QueryWrapper<DecisionCandidate>().in("run_id", runIds));
+        decisionScoreMapper.delete(new QueryWrapper<DecisionScore>().in("run_id", runIds));
+        decisionRunMapper.delete(new QueryWrapper<DecisionRun>().eq("session_id", sessionId));
     }
 
     private String randomSuffix() {

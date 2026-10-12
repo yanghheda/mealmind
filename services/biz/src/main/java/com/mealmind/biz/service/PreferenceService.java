@@ -1,12 +1,10 @@
 package com.mealmind.biz.service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -16,7 +14,6 @@ import java.util.stream.Collectors;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.mealmind.biz.common.BizException;
 import com.mealmind.biz.common.ErrorCode;
-import com.mealmind.biz.decision.DecisionProfile;
 import com.mealmind.biz.dto.PreferenceDeleteResponse;
 import com.mealmind.biz.dto.PreferenceView;
 import com.mealmind.biz.entity.Preference;
@@ -26,11 +23,10 @@ import com.mealmind.biz.session.SessionContext;
 import org.springframework.stereotype.Service;
 
 /**
- * 偏好记忆（PRD 4.8 / 技术方案接口 12/13/14）：记忆卡 CRUD、自动沉淀、带入 run 的文本拼接。
+ * 偏好记忆（PRD 4.8 / 技术方案接口 12/13/14）：记忆卡 CRUD 与带入 run 的文本拼接。
  *
- * 自动沉淀规则：明确说出的忌口立即写入 ACTIVE；口味/预算/场景同一内容跨 run 重复出现
- * （seen_count ≥ 2）才升级 ACTIVE，首次仅记 PENDING；IGNORED 为墓碑，同内容不再自动写入，
- * 直到用户手动重新添加。本次 run 已带入的偏好内容一律跳过，防止自我强化。
+ * 偏好只由用户在「我的」页手动添加（接口 13），会话理解结果不再自动沉淀；
+ * 删除为墓碑软删（IGNORED），同内容可手动重新添加恢复。
  */
 @Service
 public class PreferenceService {
@@ -42,21 +38,10 @@ public class PreferenceService {
 
     private static final Set<String> TYPES = Set.of(TYPE_TASTE, TYPE_BUDGET, TYPE_AVOID, TYPE_SCENE);
     private static final String STATUS_ACTIVE = "ACTIVE";
-    private static final String STATUS_PENDING = "PENDING";
     private static final String STATUS_IGNORED = "IGNORED";
-    private static final String SOURCE_AUTO = "AUTO";
     private static final String SOURCE_MANUAL = "MANUAL";
     private static final int CONTENT_MAX_LENGTH = 100;
-    private static final int PROMOTE_THRESHOLD = 2;
     private static final BigDecimal BUDGET_MAX_YUAN = new BigDecimal("200");
-
-    /**
-     * 忌口白名单：与 Agent {@code _AVOID_VOCAB} 同表，去掉「辣椒」——其关键词含「辣的」，
-     * 避免「想吃辣」被误记忆为忌口辣椒。
-     */
-    private static final Set<String> AVOID_WHITELIST = Set.of(
-            "香菜", "葱", "蒜", "花生", "虾", "鱼", "蛋", "乳制品", "豆制品", "菌菇",
-            "内脏", "米", "面", "粉", "蔬菜", "牛肉", "猪肉", "鸡肉", "鸭肉", "蟹");
 
     /** 文本拼接顺序：口味 → 忌口 → 预算 → 场景（与设计示例「微辣；不吃香菜；预算 30 元以内」一致）。 */
     private static final List<String> TEXT_ORDER = List.of(TYPE_TASTE, TYPE_AVOID, TYPE_BUDGET, TYPE_SCENE);
@@ -156,6 +141,16 @@ public class PreferenceService {
         };
     }
 
+    /** 历史回显：按 id 批量取行（不过滤 status，已墓碑化的行也要能还原当时的带入 chip）。 */
+    public List<Preference> selectByIds(List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return preferenceMapper.selectList(new QueryWrapper<Preference>()
+                .eq("session_id", SessionContext.sessionId())
+                .in("id", ids));
+    }
+
     /** understand 事件附加的 appliedPreferences 载荷（接口 16 向后兼容新增字段），供前端渲染带入 chips。 */
     public List<Map<String, Object>> appliedPayload(List<Preference> applied) {
         List<Map<String, Object>> payload = new ArrayList<>(applied.size());
@@ -169,116 +164,6 @@ public class PreferenceService {
         return payload;
     }
 
-    // ------------------------------------------------------------------ 自动沉淀
-
-    /**
-     * 在 DecisionService 收到 understand 时调用：返回本次新写/升级的条目（用于 preference.saved 提示）。
-     * 方法级同步：同一会话的多个 run 可能并发 observe，避免同内容重复插入。
-     */
-    public synchronized ObserveResult observe(String sessionId, String runId, DecisionProfile profile,
-                                              List<Preference> applied) {
-        if (profile == null) {
-            return ObserveResult.EMPTY;
-        }
-        Set<String> appliedContents = applied.stream().map(Preference::getContent).collect(Collectors.toSet());
-        List<PreferenceView> items = new ArrayList<>();
-        boolean promoted = false;
-
-        // 1) 明确说出的忌口 → 立即写入（白名单 + 排除本次带入，防自我强化）
-        for (String raw : dedupe(profile.avoidOrEmpty())) {
-            String content = raw == null ? null : raw.trim();
-            if (content == null || content.isEmpty() || !AVOID_WHITELIST.contains(content)
-                    || appliedContents.contains(content)) {
-                continue;
-            }
-            Preference row = find(sessionId, TYPE_AVOID, content);
-            if (row != null && STATUS_IGNORED.equals(row.getStatus())) {
-                continue;
-            }
-            if (row == null) {
-                Preference inserted = newPreference(sessionId, TYPE_AVOID, content, SOURCE_AUTO, STATUS_ACTIVE);
-                inserted.setLastSeenRunId(runId);
-                preferenceMapper.insert(inserted);
-                items.add(PreferenceView.of(inserted));
-            } else if (!STATUS_ACTIVE.equals(row.getStatus())) {
-                row.setStatus(STATUS_ACTIVE);
-                row.setSource(SOURCE_AUTO);
-                row.setLastSeenRunId(runId);
-                preferenceMapper.updateById(row);
-                items.add(PreferenceView.of(row));
-            } else {
-                touch(row, runId);
-            }
-        }
-
-        // 2) 口味 / 预算 / 场景 → 同一内容跨 run 重复出现才升级 ACTIVE
-        for (Observed candidate : inferred(profile)) {
-            if (appliedContents.contains(candidate.content())) {
-                continue;
-            }
-            Preference row = find(sessionId, candidate.type(), candidate.content());
-            if (row == null) {
-                Preference inserted = newPreference(sessionId, candidate.type(), candidate.content(),
-                        SOURCE_AUTO, STATUS_PENDING);
-                inserted.setLastSeenRunId(runId);
-                preferenceMapper.insert(inserted);
-                continue;
-            }
-            // 墓碑优先：同内容被用户删除过则整条跳过；同 run 已观测过不重复计数
-            if (STATUS_IGNORED.equals(row.getStatus()) || runId.equals(row.getLastSeenRunId())) {
-                continue;
-            }
-            int seenCount = (row.getSeenCount() == null ? 1 : row.getSeenCount()) + 1;
-            boolean promote = STATUS_PENDING.equals(row.getStatus()) && seenCount >= PROMOTE_THRESHOLD;
-            row.setSeenCount(seenCount);
-            row.setLastSeenRunId(runId);
-            if (promote) {
-                row.setStatus(STATUS_ACTIVE);
-                row.setSource(SOURCE_AUTO);
-            }
-            preferenceMapper.updateById(row);
-            if (promote) {
-                items.add(PreferenceView.of(row));
-                promoted = true;
-            }
-        }
-        return new ObserveResult(items, promoted);
-    }
-
-    /** observe 结果：items 为本次新写/升级的条目（前端渲染可撤销提示），promoted 表示是否由 PENDING 升级而来。 */
-    public record ObserveResult(List<PreferenceView> items, boolean promoted) {
-        public static final ObserveResult EMPTY = new ObserveResult(List.of(), false);
-    }
-
-    private record Observed(String type, String content) {
-    }
-
-    private List<Observed> inferred(DecisionProfile profile) {
-        List<Observed> result = new ArrayList<>();
-        for (String raw : dedupe(profile.tasteTagsOrEmpty())) {
-            addObserved(result, TYPE_TASTE, raw);
-        }
-        if (profile.budgetMax() != null) {
-            BigDecimal budget = profile.budgetMax().setScale(0, RoundingMode.HALF_UP);
-            if (budget.compareTo(BigDecimal.ONE) >= 0 && budget.compareTo(BUDGET_MAX_YUAN) <= 0) {
-                addObserved(result, TYPE_BUDGET, budget.toPlainString());
-            }
-        }
-        addObserved(result, TYPE_SCENE, profile.scene());
-        return result;
-    }
-
-    private void addObserved(List<Observed> target, String type, String rawContent) {
-        if (rawContent == null) {
-            return;
-        }
-        String content = rawContent.trim();
-        if (!content.isEmpty() && content.length() <= CONTENT_MAX_LENGTH
-                && target.stream().noneMatch(item -> item.type().equals(type) && item.content().equals(content))) {
-            target.add(new Observed(type, content));
-        }
-    }
-
     // ------------------------------------------------------------------ 工具
 
     private Preference find(String sessionId, String type, String content) {
@@ -287,16 +172,6 @@ public class PreferenceService {
                 .eq("type", type)
                 .eq("content", content)
                 .last("limit 1"));
-    }
-
-    /** 已生效偏好再次出现：只更新跨 run 计数与来源 run（计数语义为「跨 run 观测次数」）。 */
-    private void touch(Preference row, String runId) {
-        if (runId.equals(row.getLastSeenRunId())) {
-            return;
-        }
-        row.setSeenCount((row.getSeenCount() == null ? 1 : row.getSeenCount()) + 1);
-        row.setLastSeenRunId(runId);
-        preferenceMapper.updateById(row);
     }
 
     private Preference newPreference(String sessionId, String type, String content, String source, String status) {
@@ -334,12 +209,5 @@ public class PreferenceService {
             throw new BizException(ErrorCode.INVALID_PARAM);
         }
         return trimmed;
-    }
-
-    private List<String> dedupe(List<String> values) {
-        if (values == null || values.isEmpty()) {
-            return List.of();
-        }
-        return new ArrayList<>(new LinkedHashSet<>(values));
     }
 }
