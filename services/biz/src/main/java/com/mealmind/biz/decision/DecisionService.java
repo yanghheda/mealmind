@@ -733,7 +733,15 @@ public class DecisionService {
             persistDecision(runId, cards, reasons);
         }
         markRunDone(runId, latencyMs, costYuan, cards.size(), degradeLevel);
-        writeScoreCache(profile, rawCards, pendingCacheWrites, reasons);
+        // 打分缓存只回写「全程由主通道打分且未降级」的一轮（缓存污染修复）：
+        //   · degradeLevel != NORMAL：本轮混入了被迫回退的规则分（PARTIAL / FULL）；
+        //   · jevCalls <= 0：本轮根本没走主通道（强制 RULE / 未配置主通道）。
+        // 这类规则分一旦入缓存，后续 AUTO 轮会在 TTL 内命中并回放、不再调主通道，
+        // 但 run 仍报 NORMAL，降级被静默掩盖（评测看板 DEGRADE_COUNT 也会少计）。
+        // 规则分本地即可重算、零主通道成本，不回写没有损失。
+        if (DEGRADE_NORMAL.equals(degradeLevel) && jevCalls > 0) {
+            writeScoreCache(profile, rawCards, pendingCacheWrites, reasons);
+        }
         List<RelaxOption> relaxOptions = cards.isEmpty() ? relaxOptions(profile) : List.of();
         stream.emit("done", new DoneView(cards, latencyMs, costYuan,
                 new DoneView.CostBreakdown(inputTokens, outputTokens, jevCalls, estimated),
