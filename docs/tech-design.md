@@ -71,7 +71,7 @@ graph TB
 
     subgraph Agent["Agent 运行时（FastAPI / Python）"]
         ORCH["决策编排（LangGraph）<br/>理解 → 过滤复核 → 打分 → 表达"]
-        SCORER["Scorer 适配层<br/>Jev / 规则 双实现"]
+        SCORER["Scorer 适配层<br/>决策模型 / 规则 双实现"]
         RUBRIC["Rubric 仓库<br/>版本化档位定义"]
         EVAL["评测执行器<br/>Golden 集 / 稳定性 / 校准"]
     end
@@ -82,7 +82,7 @@ graph TB
     end
 
     subgraph Model["模型服务"]
-        JEV["Jev<br/>逐菜多维度打分"]
+        DECISION["决策模型（百炼）<br/>逐菜多维度打分"]
         LLM["生成式大模型<br/>理解与理由表达"]
     end
 
@@ -94,7 +94,7 @@ graph TB
     SSE --> ORCH
     ORCH --> SCORER
     SCORER --> RUBRIC
-    SCORER --> JEV
+    SCORER --> DECISION
     ORCH --> LLM
     API --> DB
     TRACK --> DB
@@ -113,7 +113,7 @@ graph TB
 | H5 客户端     | 页面渲染、交互、本地登录态与会话快照兜底、埋点上报                                                   | 约束判断、分数合成、任何模型调用                 |
 | 业务服务      | 游客会话、商家与菜品数据、购物车、偏好、硬约束过滤、加权排序、决策记录与埋点、SSE 转发、评测看板数据 | 语义理解、打分、文案生成                         |
 | Agent 运行时  | 需求理解、追问判定、调用 Scorer 打分、理由生成与事实校验、评测任务执行                               | 业务数据写入、价格与时效计算、用户鉴权、最终排序 |
-| Scorer 适配层 | 对同一份「菜品 + 需求」产出五维分与置信度，屏蔽 Jev 与规则实现的差异                                 | 组织候选、决定权重、写库                         |
+| Scorer 适配层 | 对同一份「菜品 + 需求」产出五维分与置信度，屏蔽决策模型与规则实现的差异                                 | 组织候选、决定权重、写库                         |
 | 数据库        | 业务数据与决策记录的持久化                                                                           | —                                                |
 
 依赖方向单向：H5 → 业务服务 → Agent 运行时 → 模型。无反向依赖，无环。
@@ -146,7 +146,7 @@ sequenceDiagram
     B->>A: POST /internal/score（候选 + 需求）
     loop 每批最多 5 道
         A->>S: score(菜品, 需求)
-        S->>S: Jev 或规则打分
+        S->>S: 决策模型或规则打分
         A-->>B: event: card（单菜分数）
         B-->>H5: event: card
     end
@@ -171,12 +171,12 @@ sequenceDiagram
 | LangGraph（决策编排）      | 决策链路是有条件分支的有限状态机（追问、无候选、部分降级、重试），用状态图表达比手写分支清晰，节点边界又能与 SSE 事件一一对应；与既有两个项目同栈但用法不同：ForgeAI 是有界工具循环，HengPick 是链路编排，本项目是带降级分支的决策状态图 | [Expert judgment]                                                                            |
 | MySQL                      | 决策记录需要事务与关系查询（评测统计按维度聚合）                                                                                                                                                                                         | [Expert judgment]                                                                            |
 | Redis                      | 打分缓存（键为菜品 + 需求指纹 + rubric 版本）与进度流，读写量大且可丢                                                                                                                                                                    | [Expert judgment]                                                                            |
-| Jev（TypeSafe）            | 逐菜打分需要类型化输出与校准概率，且单次成本极低；官方给出 70–500ms 延迟、输出免费、64k 上下文                                                                                                                   | [Research-backed] 2026-09；经 TeamoRouter 接入（TypeSafe 原生格式），输入按官方价 0.01 折        |
+| 决策模型（TypeSafe System One） | 逐菜打分需要类型化输出与概率分布，且不生成文本，延迟与成本与输出长度无关；令牌上限 64k，量表建议 3–7 级           | [Research-backed] 2026-10；阿里云百炼 `decision-model-preview` 接入（限时免费，实测服务端 65–75ms）；原 Jev 经 TeamoRouter 接入，2026-10-12 下线后同协议平替 |
 | 生成式大模型（理解与表达） | 语义理解与自然语言表达是它的强项，且不需要概率校准                                                                                                                                                                                       | [Expert judgment] **已定：阿里云百炼 qwen3.8**；理解器与表达器默认 flash，max 经配置切换         |
 | Docker Compose             | 项目只用一个 compose 编排三个应用，以外部网络接入服务器既有基础设施（nginx / MySQL / Redis），复用而不重复部署；发布只动自己的容器，不触碰基础设施与其它项目                                                                             | 与既有项目部署方式一致 [Expert judgment]                                                     |
 | GitHub Actions + GHCR      | push `main` 即测试、构建镜像、推送镜像仓库并部署到服务器；按变更路径只重建受影响的服务，演示期不需要更重的发布系统                                                                                                                       | [Expert judgment]                                                                            |
 
-关于 Jev 的已知弱项（官方文档明确列出算术、日期、干扰信息、中文弱于英文），本方案的处理方式是**用架构规避而不是靠提示词补救**：价格、预算占比、时效、月售等数值全部由业务服务算好，以文字摘要进入打分输入；rubric 档位描述用短句中文并附关键英文词 [Expert judgment]。
+关于打分模型的已知弱项（原 Jev 官方文档明确列出算术、日期、干扰信息、中文弱于英文），本方案的处理方式是**用架构规避而不是靠提示词补救**：价格、预算占比、时效、月售等数值全部由业务服务算好，以文字摘要进入打分输入；rubric 档位描述用短句中文 [Expert judgment]。平替的 `decision-model-preview` 沿用同一输入形态与档位定义，规避策略不变。
 
 ## 3. 模块设计
 
@@ -207,7 +207,7 @@ sequenceDiagram
 | 职责 | 把自然语言需求转成结构化偏好；对给定候选逐菜打分；生成受约束的推荐理由；执行评测任务 |
 | 输入 | 待理解的原文；待打分的候选与需求；评测批次指令                                       |
 | 输出 | 结构化偏好、逐菜五维分与置信度、逐卡理由、评测结果                                   |
-| 依赖 | Scorer 适配层、Jev、生成式大模型、Rubric 仓库                                        |
+| 依赖 | Scorer 适配层、决策模型、生成式大模型、Rubric 仓库                                  |
 | 边界 | 不算价、不排序、不写业务库、不直接面向客户端                                         |
 
 编排层用 LangGraph 的 StateGraph 搭建：每个节点只做一件事，节点之间的条件边承载追问回环、跳过与降级分支；图本身不保存运行状态，run 的快照由业务服务统一持久化（见 §6），避免两处状态口径不一致。
@@ -321,12 +321,12 @@ Rubric 仓库：档位定义以 YAML 文件维护，带版本号；运行时加�
 | `clarify`          | 信息不足需追问（M4 W2）      | `questions[]`（每题 `id` / `type` / `title` / `options[{id,label,value}]` / `skippable`）、`allowSkip`（恒 true）、`maxQuestions`（本轮问题数，最多 2） |
 | `clarify.resolved` | 追问结束（回答 / 跳过 / 超时） | `skipped`、`reason`（`answered` / `user_skip` / `timeout`）                                                              |
 | `filtered`         | 约束过滤完成                 | `candidateCount`、`filteredDetail`（各约束命中次数，对齐 PRD 5.3）                                                       |
-| `scoring`          | 打分批次进度                 | `done`、`total`、`mode`（`JEV` / `RULE` / `MIXED`）                                                                      |
+| `scoring`          | 打分批次进度                 | `done`、`total`、`mode`（`DECISION` / `RULE` / `MIXED`）                                                                      |
 | `card`             | 单菜打分完成                 | `card`（名称、商家、价格、综合分、五维分、置信度、模式标记）                                                             |
 | `reason.delta`     | 理由流式增量                 | `dishId`、`text`                                                                                                         |
 | `preference.saved` | 偏好自动沉淀新写或升级（M4 W1） | `items[]`（`id` / `type` / `content`）、`promoted`（是否由观察中升级为启用）                                             |
-| `usage`            | 链路收尾的用量与阶段耗时（M4 W5） | `inputTokens`、`outputTokens`、`jevCalls`、`estimated`、`understandMs`、`scoreMs`、`phraseMs`、`filterWaitMs`         |
-| `done`             | 全部完成                     | `cards[]`（最终排序）、`latencyMs`、`costYuan`、`costBreakdown`（token 与 Jev 调用数）、`rubricVersion`、`degradeLevel`  |
+| `usage`            | 链路收尾的用量与阶段耗时（M4 W5） | `inputTokens`、`outputTokens`、`decisionCalls`、`estimated`、`understandMs`、`scoreMs`、`phraseMs`、`filterWaitMs`         |
+| `done`             | 全部完成                     | `cards[]`（最终排序）、`latencyMs`、`costYuan`、`costBreakdown`（token 与决策模型调用数）、`rubricVersion`、`degradeLevel`  |
 | `degraded`         | 触发降级                     | `level`（`PARTIAL` / `FULL`）、`reason`                                                                                  |
 | `error`            | 无法完成                     | `code`、`message`、`retryable`                                                                                           |
 
@@ -478,7 +478,7 @@ M4 增量列（`preference.seen_count` / `last_seen_run_id`、`decision_run.appl
 | value        | decimal(4,2) | NOT NULL     | 0–10                                                       |
 | confidence   | decimal(4,3) | NOT NULL     | 0–1                                                        |
 | distribution | json         | NULL         | 档位概率分布                                               |
-| score_mode   | varchar(8)   | NOT NULL     | `JEV` / `RULE`                                             |
+| score_mode   | varchar(8)   | NOT NULL     | `DECISION` / `RULE`                                        |
 
 每菜共 5 行（一个维度一行），综合分不在此表，见 `decision_candidate`。
 
@@ -604,8 +604,8 @@ stateDiagram-v2
 
 | 档位    | 打分实现                     | 用户可见                       | 记录                                  |
 | ------- | ---------------------------- | ------------------------------ | ------------------------------------- |
-| NORMAL  | 全部走 Jev                   | 无差异                         | `score_mode = JEV`                    |
-| PARTIAL | 失败菜品走规则分，其余走 Jev | 该卡标注「规则分」             | `degrade_level = PARTIAL`，卡片级标记 |
+| NORMAL  | 全部走决策模型               | 无差异                         | `score_mode = DECISION`               |
+| PARTIAL | 失败菜品走规则分，其余走决策模型 | 该卡标注「规则分」             | `degrade_level = PARTIAL`，卡片级标记 |
 | FULL    | 全部走规则分                 | 顶部横幅「当前为规则推荐模式」 | `degrade_level = FULL`                |
 
 冷却与探测阈值取 60 秒与单次探测，是为了避免模型恢复瞬间被并发请求打回降级 [Expert judgment]。
@@ -623,14 +623,14 @@ class Scorer(Protocol):
 
 | 实现         | 输入                                 | 输出                                     | 触发条件                           |
 | ------------ | ------------------------------------ | ---------------------------------------- | ---------------------------------- |
-| `JevScorer`  | 业务服务算好的文字摘要 + rubric 档位 | 五维概率加权位置与置信度、忌口护栏概率   | 默认                               |
-| `RuleScorer` | 标签匹配 + 价格公式 + 口碑分         | 同结构，置信度按固定规则给出（通常较低） | Jev 不可用、超时、失败，或配置强制 |
+| `DecisionScorer` | 业务服务算好的文字摘要 + rubric 档位 | 五维概率加权位置与置信度、忌口护栏概率   | 默认（`AUTO`）                     |
+| `RuleScorer` | 标签匹配 + 价格公式 + 口碑分         | 同结构，置信度按固定规则给出（通常较低） | 决策模型不可用、超时、失败，或配置强制 |
 
-`JevScorer` 的关键实现点（对应 PRD 5.4）：
+`DecisionScorer` 的关键实现点（对应 PRD 5.4）：
 
-- 一次请求内并行提交 5 个 `score` 问题与 1 个 `noul` 护栏问题，用 Jev 的多问题并行能力省往返。
+- 一次请求内并行提交 5 个 `score` 问题与 1 个 `noul` 护栏问题，用决策模型的多问题并行能力省往返。
 - 每个维度在请求中显式声明档位描述（2–10 级），返回后按档位归一化到 0–10。
-- 单菜超时 1.5s、失败重试 1 次；候选按每批 5 道并发，最多 4 批。
+- 单菜超时 3s、失败重试 1 次；候选按每批 5 道并发，最多 4 批。
 - 忌口护栏返回 ≥0.5 视为风险，剔除该菜并写 badcase。
 - 调用预算：单次 run 的模型调用次数与总时长上限在配置中给出，超限即转 FULL 降级 [Expert judgment]。
 
@@ -645,7 +645,7 @@ class Scorer(Protocol):
 | 场景适配   | 场景关键词与菜品标签的匹配（如「减脂」对「低卡」） |
 | 忌口护栏   | 标签精确匹配，命中即判风险                         |
 
-注意 `RuleScorer` 不是「假数据」，它是可在评测里与 Jev 对比的真实基线——这也是回答「为什么不用规则」这个必然会被问到的问题的证据来源 [Expert judgment]。
+注意 `RuleScorer` 不是「假数据」，它是可在评测里与决策模型对比的真实基线——这也是回答「为什么不用规则」这个必然会被问到的问题的证据来源 [Expert judgment]。
 
 ### 6.3 缓存与去重
 
@@ -670,9 +670,9 @@ class Scorer(Protocol):
 参数依据（2026-10-10 实测）：
 
 - **理解器**：qwen3.8-flash 默认「思考模式」下单次 2.9–7.7s，2s 超时会导致每次调用都超时回落；关闭思考（`enable_thinking=false`）后降至 0.9–2.0s（中位 1.26s），故取 3s（约 1.5× 实测上限）。
-- **单菜打分**：Jev 经 TeamoRouter 实测中位 1.2s、上限 2.1s（12 次串行），原定 1.5s 约一半调用会超时，故取 3s。
+- **单菜打分**：原 Jev 经 TeamoRouter 实测中位 1.2s、上限 2.1s（12 次串行），原定 1.5s 约一半调用会超时，故取 3s；平替的 `decision-model-preview` 实测服务端仅 65–75ms（含 TLS 全链路约 0.3s/次，2026-10-12），3s 继续留足余量。
 - **表达器**：单条调用 1.3s 且 20 道菜串行需 26s，改为按批（每批 5 道）并发调用；多批同样并发而非串行。
-- 实测整链路：10 道候选（Jev 打分 + qwen 理解/表达）端到端 5.2s，5 并发打分墙钟 1.06s。
+- 实测整链路：10 道候选（Jev 打分 + qwen 理解/表达）端到端 5.2s，5 并发打分墙钟 1.06s；2026-10-12 平替复测（`decision-model-preview` + qwen 理解/表达，本地 compose）：20 道候选端到端 4.0s，打分阶段墙钟 1.1s，run 记 DONE / NORMAL。
 
 ## 7. 评测系统设计
 
@@ -690,7 +690,7 @@ sequenceDiagram
     loop 每条 Golden 用例
         E->>B: 调用同一份约束过滤逻辑
         B-->>E: 候选集
-        E->>S: 打分（Jev）
+        E->>S: 打分（决策模型）
         E->>E: 与期望约束、期望要点比对
     end
     loop 稳定性抽检（每条用例重复 3 次）
@@ -757,7 +757,7 @@ graph TB
     B -->|"项目内网"| A
     B -->|"infra-net"| M
     B -->|"infra-net"| R
-    A -.->|"HTTPS"| EXT["Jev / 生成式大模型"]
+    A -.->|"HTTPS"| EXT["决策模型 / 生成式大模型"]
 ```
 
 图读法：公网只有边缘 nginx 一个入口，MealMind 不映射任何宿主机端口。三个容器的网络接入面不同，这是本拓扑的核心：
@@ -872,22 +872,21 @@ CI 实施要点（M4 W6）：工作流为单文件四 job（web / api / agent / 
 
 | 配置                        | 说明                          | 默认                               |
 | --------------------------- | ----------------------------- | ---------------------------------- |
-| `scorer.mode`               | `JEV` / `RULE` / `AUTO`       | `RULE`（2026-10-12 起默认；Jev 下线，见 §11） |
+| `scorer.mode`               | `DECISION` / `RULE` / `AUTO`  | `AUTO`（2026-10-12 起；决策模型平替后恢复自动通道，见 §11） |
 | `scorer.batch-size`         | 单批打分菜品数                | 5                                  |
 | `scorer.max-candidates`     | 参与打分的候选上限            | 20                                 |
 | `degrade.partial-threshold` | 触发部分降级的失败率          | 0.3                                |
 | `degrade.cooldown-seconds`  | 全量降级后的探测冷却          | 60                                 |
 | `understand.timeout-s`      | 理解器单次调用超时            | 3                                  |
 | `phrase.timeout-s`          | 表达器单批调用超时            | 4                                  |
-| `jev.timeout-s`             | Jev 单菜打分超时              | 3                                  |
-| `jev.proxy-url`             | Jev 出网代理（本地直连不通时）| 空（生产可直连）                   |
+| `decision.timeout-s`        | 决策模型单菜打分超时          | 3                                  |
 | `qwen.model`                | 生成式模型 ID                 | `qwen3.8-max-0902`（关闭思考模式，flash 经 `QWEN_MODEL` 切回） |
 | `run.timeout-ms`            | 整轮决策超时                  | 12000（`RUN_TIMEOUT_MS` 可覆盖）   |
 | `clarify.timeout-ms`        | 澄清等待窗口（M4 W2，收到 clarify 后整轮超时换档为 run + clarify） | 60000（`CLARIFY_TIMEOUT_MS` 可覆盖） |
 | `run.cost-budget-yuan`      | 单 run 模型成本上限           | 0.02                               |
 | `cost.qwen-input-per-million` | 生成式输入单价（元/百万 token） | 12 |
 | `cost.qwen-output-per-million` | 生成式输出单价（元/百万 token） | 36 |
-| `cost.jev-per-call`         | Jev 单次调用单价（元）        | 0.0003                             |
+| `cost.decision-per-call`    | 决策模型单次调用单价（元）    | 0（`decision-model-preview` 限时免费） |
 | `cost.gate-yuan`            | 单次决策成本门限（看板）      | 0.01                               |
 | `rubric.version`            | 当前档位版本                  | `v1.2`                             |
 | `agent.base-url`            | 业务服务访问 Agent 的内部地址 | `http://mealmind-agent:8000`       |
@@ -902,7 +901,7 @@ CI 实施要点（M4 W6）：工作流为单文件四 job（web / api / agent / 
 | 错误类     | 场景                         | 处理                                                                                 |
 | ---------- | ---------------------------- | ------------------------------------------------------------------------------------ |
 | 参数错误   | 空需求、文本超长、商家不存在 | 返回 4xx 明确错误码，前端就地提示，不创建 run                                        |
-| 模型超时   | Jev 或理解器超时             | 按 §6.4 重试与降级，SSE 发 `degraded`                                                |
+| 模型超时   | 决策模型或理解器超时         | 按 §6.4 重试与降级，SSE 发 `degraded`                                                |
 | 模型不可用 | 连续失败超阈值               | 转 FULL 降级，用户可见横幅，后台按冷却探测恢复                                       |
 | 无候选     | 约束过滤后为空               | 不发 `card`，发 `done` 并附「可放宽的条件」，前端一键放宽重算                        |
 | 会话失效   | 已退出登录或数据被清         | 返回 401，前端回封面重新登录                                                         |
@@ -921,13 +920,13 @@ CI 实施要点（M4 W6）：工作流为单文件四 job（web / api / agent / 
 | M3 评测与降级 | `JevScorer` 接入；qwen3.8 理解器/表达器接入（保留关键字/模板降级）；降级状态机与打分缓存；Golden 集（≈50 条）与评测执行器；看板接口与页面 | Go/No-Go 全项可测，双通道可切换演示 | ✅ 已完成（实测见 PRD §7.5） |
 | M4 打磨上线   | 偏好记忆接口与 `/mine`；追问链路（clarify 节点 + answers 端点）；接口 18（REFINE / NEXT_BATCH）；搜索接口与 `/search`；动效打磨；`cost_yuan` 计量（标价口径 + 阶段耗时）；GitHub Actions 流水线接入与公网部署 | 公网可访问，演示动线顺畅            | 🚧 功能部分（W1–W5）已完成；CI 与公网部署待 W6 |
 
-把 `RuleScorer` 排在 `JevScorer` 之前，是因为规则通道能让整条链路在不依赖外部模型的情况下先跑通并固定住接口契约；等 Jev 访问到位时只换实现，不动上下游 [Expert judgment]。
+把 `RuleScorer` 排在决策模型（原 Jev）接入之前，是因为规则通道能让整条链路在不依赖外部模型的情况下先跑通并固定住接口契约；等模型访问到位时只换实现，不动上下游 [Expert judgment]。
 
 ## 11. 待确认事项
 
 | 事项               | 说明                                                                                                       | 状态                                                         |
 | ------------------ | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Jev 接入方式与端点 | **经 TeamoRouter 调用**（TypeSafe 原生格式）。端点 `POST https://api.teamorouter.com/v1/systemone`，模型 `jev`；请求为 `state` + `questions`（5 个 `score` + 1 个 `noul` 护栏），`score` 返回 criteria 上的 0 基插值下标，按档位数线性归一化到 0–10，置信度取返回的 `confidence`。选它是因为：官方直连需预付 \$5、Vercel AI Gateway 免费档不含 Jev（实测 403）、其免费决策模型限流 5 次/分钟（20 道候选要 4 分钟） | 已定并**联调通过**（2026-10-10）：单菜打分、5 并发、整链路与 PARTIAL 单菜降级均实测正常。**2026-10-12 起 TeamoRouter 侧模型下线（持续 503）**：本地与生产默认 `SCORER_MODE=RULE`（规则分 = M2 基线；RULE 下 run 记 DONE/NORMAL、无降级横幅），通道保留，模型恢复后改回 `AUTO` 即可；需演示降级横幅时临时切 `AUTO`——Jev 不可用会直接落 FULL 档 |
+| 决策模型接入方式与端点 | **阿里云百炼 `decision-model-preview`**（TypeSafe System One 原生格式）。端点 `POST https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone`（业务空间专属域名）或试用域名 `https://trial.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone`；请求为 `state` + `questions`（5 个 `score` + 1 个 `noul` 护栏），`score` 返回 criteria 上的概率加权下标，按档位数线性归一化到 0–10，置信度取返回的 `confidence`。原方案经 TeamoRouter 调用 Jev（同协议）：官方直连需预付 \$5、Vercel AI Gateway 免费档不含 Jev（实测 403）、其免费决策模型限流 5 次/分钟 | 2026-10-12 起：Jev 于 TeamoRouter 下线（持续 503），同日平替为百炼 `decision-model-preview`（同协议，限时免费）并实测通过——单菜 6 问服务端 65–75ms、本地全链路 20 道候选 DONE/NORMAL（`score_mode=DECISION`）；本地与生产默认 `SCORER_MODE=AUTO` |
 | 生成式模型选型     | 阿里云百炼 qwen3.8：理解器与表达器当前用 max-0902，flash 经 `QWEN_MODEL` 可随时切回                             | 已定并接入（2026-10-06 起用 flash，2026-10-10 切换 max-0902）；成本已按标价计量（PRD §5.8） |
 | Rubric 档位定稿    | 五维各自 2–10 级的措辞需先用 Golden 集验证区分度                                                           | 已定稿：`v1.2`（M3 内产出，评测批跑与稳定性复跑均基于此版本） |
 | 评测样本量         | 校准分桶达到 30 样本所需的人工标注工作量                                                                   | 口径已实现（`sample_size` 驱动，不足不解读）；标注样本随批跑累积 |

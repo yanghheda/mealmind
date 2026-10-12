@@ -18,7 +18,7 @@
 移动端 H5               业务服务 mealmind-api              Agent 运行时 mealmind-agent
 React + Vite   ──/api──▶  Spring Boot :8080     ──I1/SSE──▶  FastAPI + LangGraph :8000
                           │  约束过滤 / 加权排序 / 落库               │
-                          ├─ MySQL（决策与偏好账本）                  ├─ Jev（System One 打分，可降级规则分）
+                          ├─ MySQL（决策与偏好账本）                  ├─ 决策模型（百炼 System One 打分，可降级规则分）
                           └─ Redis（缓存 / 进度流 / 断线恢复）         └─ qwen3.8（理解与表达）
 ```
 
@@ -33,7 +33,7 @@ React + Vite   ──/api──▶  Spring Boot :8080     ──I1/SSE──▶ 
 | 前端 `apps/h5`          | React 18 · TypeScript · Vite · React Router · Zustand · TanStack Query              |
 | 业务服务 `services/biz` | Java 21 · Spring Boot 3.5 · MyBatis-Plus · MySQL · Redis · SSE                      |
 | Agent `services/agent`  | Python · FastAPI · LangGraph（理解 → 追问 → 过滤 → 打分 → 表达）                    |
-| 模型                    | Jev（TeamoRouter，Subjective Scoring） · qwen3.8-max-0902（阿里云百炼，理解与表达） |
+| 模型                    | decision-model-preview（阿里云百炼决策模型，System One 打分） · qwen3.8-max-0902（理解与表达） |
 | 交付                    | Docker Compose（三容器编排）· 共享 MySQL / Redis 基础设施                           |
 
 ## 目录结构
@@ -55,7 +55,7 @@ prototype         高保真可交互原型（纯静态 HTML/CSS/JS，file:// 可
 # 1. 仅首次：创建与服务器同名共享网络
 docker network create infra-net
 
-# 2. 准备环境变量（JEV_* / DASHSCOPE_API_KEY 等，不提交仓库）
+# 2. 准备环境变量（DECISION_* / DASHSCOPE_API_KEY 等，不提交仓库）
 cp deploy/.env.example deploy/.env
 
 # 3. 仅首次：初始化数据库，按序号执行
@@ -69,7 +69,7 @@ docker compose --env-file deploy/.env -f deploy/compose.yml -f deploy/compose.lo
 cd apps/h5 && npm ci && npm run dev   # http://localhost:5173
 ```
 
-`compose.yml` 只编排三个应用容器、不映射宿主机端口（生产由边缘 nginx 反代）；`compose.local.yml` 为本地叠加：源码构建镜像、api 暴露回环 8080、放宽整轮超时。
+`compose.yml` 只编排三个应用容器、不映射宿主机端口（生产由边缘 nginx 反代）；`compose.local.yml` 为本地叠加：源码构建镜像、api 暴露回环 8080。
 
 ## 文档
 
@@ -90,5 +90,5 @@ cd apps/h5 && npm ci && npm run dev   # http://localhost:5173
 
 ## 说明
 
-- Jev 打分通道 2026-10-12 起从 TeamoRouter 下线（持续 503），默认 `SCORER_MODE=RULE` 走规则分（M2 基线），链路照常出结果；模型恢复后将 `SCORER_MODE` 改回 `AUTO` 即可切回。
-- 演示降级横幅需临时切 `AUTO`：Jev 不可用时整轮会落 FULL 档（降级是真实行为，不是模拟开关）。
+- 打分通道：2026-10-12 原 Jev（TeamoRouter）下线，平替为阿里云百炼 `decision-model-preview`（同 System One 协议，限时免费），默认 `SCORER_MODE=AUTO`（决策模型优先、失败自动降级规则分）。
+- 演示降级横幅：`AUTO` 下让决策模型不可达（改错 `DECISION_BASE_URL` / 断网）即整轮落 FULL 档——降级是真实行为，不是模拟开关；`SCORER_MODE=RULE` 为强制对照通道（不触发降级）。
