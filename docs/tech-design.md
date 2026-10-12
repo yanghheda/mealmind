@@ -249,7 +249,7 @@ Rubric 仓库：档位定义以 YAML 文件维护，带版本号；运行时加�
 | 15  | POST   | `/api/agent/runs`                  | 创建一次决策               | 是   |
 | 16  | GET    | `/api/agent/runs/{runId}/stream`   | SSE 订阅决策进度           | 是   |
 | 17  | GET    | `/api/agent/runs/{runId}`          | 拉取快照（断线恢复）       | 是   |
-| 18  | POST   | `/api/agent/runs/{runId}/refine`   | 修正需求或换一批           | 是   |
+| 18  | POST   | `/api/agent/runs/{runId}/refine`   | 修正需求（换一批前端已下线，接口保留兼容） | 是   |
 | 19  | GET    | `/api/eval/summary`                | 评测看板指标               | 是   |
 | 20  | GET    | `/api/eval/badcases`               | badcase 列表               | 是   |
 | 21  | GET    | `/api/search`                      | 关键字搜索（商家 / 菜品）  | 是   |
@@ -340,15 +340,15 @@ Rubric 仓库：档位定义以 YAML 文件维护，带版本号；运行时加�
 | Success   | `200`；`data: { runId, status, profile, filteredDetail, cards[], lastSeq, latencyMs, costYuan, rubricVersion, degradeLevel, clarify, clarifyState }`；`status` ∈ `RUNNING` / `DONE` / `FAILED` / `DEGRADED` |
 | 说明      | 前端重连先拉快照对齐，再带 `Last-Event-ID` 续订流；`clarify` 为待答澄清载荷（未追问为 null），`clarifyState` ∈ `PENDING` / `ANSWERED` / `SKIPPED`（M4 W2）。`RUNNING + PENDING` 表示正处于等待澄清：前端恢复追问卡并续订流，而非按「连接中断」处理 |
 
-**接口 18 · 修正与换一批**
+**接口 18 · 修正（换一批已下线）**
 
 | 字段      | 值                                                                                                              |
 | --------- | --------------------------------------------------------------------------------------------------------------- |
 | Operation | `POST /api/agent/runs/{runId}/refine`                                                                           |
-| Request   | `type`（`REFINE` / `NEXT_BATCH`）、`text`（`REFINE` 时必填）、`excludeDishIds`（`NEXT_BATCH` 时传已展示的菜品）、`pageSize`（`NEXT_BATCH` 可选，默认 4、上限 20） |
+| Request   | `type`（`REFINE` / `NEXT_BATCH`）、`text`（`REFINE` 时必填）、`excludeDishIds`（`NEXT_BATCH` 时传已展示的菜品）、`pageSize`（`NEXT_BATCH` 可选，默认 5、上限 5） |
 | Success   | `200`；`data: RefineResponse`——`REFINE` → `{ runId（新）, streamUrl, cards: null, hasMore: null }`；`NEXT_BATCH` → `{ runId（原）, streamUrl: null, cards[], hasMore }` |
 | Error     | `404 RUN_NOT_FOUND`、`409 RUN_NOT_DONE`（父 run 未完成）、`400 EMPTY_TEXT` / `TEXT_TOO_LONG` / `INVALID_PARAM`、`429 TOO_MANY_RUNS` |
-| 说明      | `REFINE` 新建继承 run（落 `parent_run_id`，继承原 run 的 mode / merchantId 与带入偏好；文本 = 原话 + 修正），走完整理解与 SSE，未受影响菜品的打分自然复用缓存；`NEXT_BATCH` 同 run 直接读已落库候选重建卡片（排除 `excludeDishIds`、按 `rank_no` 取下一组），零模型成本、无 SSE 秒回，`hasMore=false` 表示候选已看完 |
+| 说明      | `REFINE` 新建继承 run（落 `parent_run_id`，继承原 run 的 mode / merchantId 与带入偏好；文本 = 原话 + 修正），走完整理解与 SSE，未受影响菜品的打分自然复用缓存；`NEXT_BATCH` 同 run 直接读已落库候选重建卡片（排除 `excludeDishIds`、按 `rank_no` 取下一组），零模型成本、无 SSE 秒回，`hasMore=false` 表示候选已看完。**`NEXT_BATCH` 自 2026-10-13 起前端已不再调用**（结果改为横向滑动浏览全部 ≤5 张候选，取消「换一批」按钮），接口与参数保留仅为向后兼容，无新功能依赖 |
 
 **接口 I1c · 澄清回答回填（协作式编排的续接调用）**
 
@@ -492,7 +492,7 @@ M4 增量列（`preference.seen_count` / `last_seen_run_id`、`decision_run.appl
 | rank_no              | int          | 最终名次（由代码排序写入） |
 | is_shown             | tinyint      | 是否展示给用户             |
 | is_added_to_cart     | tinyint      | 是否被加购（采纳指标来源） |
-| reason               | varchar(64)  | 推荐理由（≤30 字；落库供快照恢复与换一批重建卡片，M4 W1/W3） |
+| reason               | varchar(64)  | 推荐理由（≤30 字；落库供快照恢复，M4 W1/W3；原用于换一批重建卡片，换一批前端已下线后仅快照恢复使用） |
 
 **其余实体**
 
@@ -630,7 +630,7 @@ class Scorer(Protocol):
 
 - 一次请求内并行提交 5 个 `score` 问题与 1 个 `noul` 护栏问题，用决策模型的多问题并行能力省往返。
 - 每个维度在请求中显式声明档位描述（2–10 级），返回后按档位归一化到 0–10。
-- 单菜超时 3s、失败重试 1 次；候选按每批 5 道并发，最多 4 批。
+- 单菜超时 3s、失败重试 1 次；候选按每批 5 道并发，候选上限 5 道即最多 1 批。
 - 忌口护栏返回 ≥0.5 视为风险，剔除该菜并写 badcase。
 - 调用预算：单次 run 的模型调用次数与总时长上限在配置中给出，超限即转 FULL 降级 [Expert judgment]。
 
@@ -655,7 +655,7 @@ class Scorer(Protocol):
 - 条目内容 = 维度分 + 打分通道 + 推荐理由。理由同属模型产物，只缓存分数起不到「不重复计费」的作用。
 - 命中的菜品不进回填的候选集，Agent 因此完全不参与打分与理由生成（图直接结束）；进度事件由业务服务把命中数补齐，前端看到的 `total` 始终是全部候选。缓存不可用时全部按未命中处理，不影响正确性。
 - 需求指纹：把结构化偏好归一化（口味排序、预算取整、忌口排序）后哈希，保证「微辣 30 元内」与「30 元内 微辣」命中同一缓存。
-- 换一批不重复打分：`NEXT_BATCH` 只从已有候选里取下一组，命中缓存。
+- 换一批不重复打分：`NEXT_BATCH` 只从已有候选里取下一组，命中缓存。**注：`NEXT_BATCH` 自 2026-10-13 起前端已不再调用**（结果横向滑动浏览全部 ≤5 张候选），此缓存策略仅保留兼容。
 
 ### 6.4 超时与重试
 
@@ -671,8 +671,8 @@ class Scorer(Protocol):
 
 - **理解器**：qwen3.8-flash 默认「思考模式」下单次 2.9–7.7s，2s 超时会导致每次调用都超时回落；关闭思考（`enable_thinking=false`）后降至 0.9–2.0s（中位 1.26s），故取 3s（约 1.5× 实测上限）。
 - **单菜打分**：原 Jev 经 TeamoRouter 实测中位 1.2s、上限 2.1s（12 次串行），原定 1.5s 约一半调用会超时，故取 3s；平替的 `decision-model-preview` 实测服务端仅 65–75ms（含 TLS 全链路约 0.3s/次，2026-10-12），3s 继续留足余量。
-- **表达器**：单条调用 1.3s 且 20 道菜串行需 26s，改为按批（每批 5 道）并发调用；多批同样并发而非串行。
-- 实测整链路：10 道候选（Jev 打分 + qwen 理解/表达）端到端 5.2s，5 并发打分墙钟 1.06s；2026-10-12 平替复测（`decision-model-preview` + qwen 理解/表达，本地 compose）：20 道候选端到端 4.0s，打分阶段墙钟 1.1s，run 记 DONE / NORMAL。
+- **表达器**：单条调用 1.3s 且候选串行需 26s（原 20 道上限），改为按批（每批 5 道）并发调用；候选上限 5 道即 1 批，多批场景同样并发而非串行。
+- 实测整链路：10 道候选（Jev 打分 + qwen 理解/表达）端到端 5.2s，5 并发打分墙钟 1.06s；2026-10-12 平替复测（`decision-model-preview` + qwen 理解/表达，本地 compose）：20 道候选端到端 4.0s，打分阶段墙钟 1.1s，run 记 DONE / NORMAL。2026-10-13 候选上限由 20 收紧为 5 后：5 道候选端到端 2.5–4.5s，打分阶段墙钟 ≈0.3s，run 记 DONE / NORMAL。
 
 ## 7. 评测系统设计
 
@@ -874,7 +874,7 @@ CI 实施要点（M4 W6）：工作流为单文件四 job（web / api / agent / 
 | --------------------------- | ----------------------------- | ---------------------------------- |
 | `scorer.mode`               | `DECISION` / `RULE` / `AUTO`  | `AUTO`（2026-10-12 起；决策模型平替后恢复自动通道，见 §11） |
 | `scorer.batch-size`         | 单批打分菜品数                | 5                                  |
-| `scorer.max-candidates`     | 参与打分的候选上限            | 20                                 |
+| `scorer.max-candidates`     | 参与打分的候选上限            | 5（2026-10-13 由 20 收紧）                                 |
 | `degrade.partial-threshold` | 触发部分降级的失败率          | 0.3                                |
 | `degrade.cooldown-seconds`  | 全量降级后的探测冷却          | 60                                 |
 | `understand.timeout-s`      | 理解器单次调用超时            | 3                                  |
@@ -918,7 +918,7 @@ CI 实施要点（M4 W6）：工作流为单文件四 job（web / api / agent / 
 | M1 平台骨架   | 三容器 compose 打通（本地 + 接入 `infra-net`）；MySQL 建库建表；种子数据脚本（固定随机种子）；商家与菜单接口；游客会话与购物车接口；H5 骨架页对接 | 登录 → 浏览 → 加购 全链路可用       | ✅ 已完成          |
 | M2 决策链路   | LangGraph 状态图骨架；SSE 协议实现；约束引擎；`RuleScorer` 先接（不依赖外部模型即可跑通）；H5 会话页对接                                          | 一句需求出带分卡片，全程走规则分    | ✅ 已完成          |
 | M3 评测与降级 | `JevScorer` 接入；qwen3.8 理解器/表达器接入（保留关键字/模板降级）；降级状态机与打分缓存；Golden 集（≈50 条）与评测执行器；看板接口与页面 | Go/No-Go 全项可测，双通道可切换演示 | ✅ 已完成（实测见 PRD §7.5） |
-| M4 打磨上线   | 偏好记忆接口与 `/mine`；追问链路（clarify 节点 + answers 端点）；接口 18（REFINE / NEXT_BATCH）；搜索接口与 `/search`；动效打磨；`cost_yuan` 计量（标价口径 + 阶段耗时）；GitHub Actions 流水线接入与公网部署 | 公网可访问，演示动线顺畅            | 🚧 功能部分（W1–W5）已完成；CI 与公网部署待 W6 |
+| M4 打磨上线   | 偏好记忆接口与 `/mine`；追问链路（clarify 节点 + answers 端点）；接口 18（REFINE / NEXT_BATCH，NEXT_BATCH 前端已下线、接口保留兼容）；搜索接口与 `/search`；动效打磨；候选上限 20→5、结果横向滑动；`cost_yuan` 计量（标价口径 + 阶段耗时）；GitHub Actions 流水线接入与公网部署 | 公网可访问，演示动线顺畅            | 🚧 功能部分（W1–W5）已完成；CI 与公网部署待 W6 |
 
 把 `RuleScorer` 排在决策模型（原 Jev）接入之前，是因为规则通道能让整条链路在不依赖外部模型的情况下先跑通并固定住接口契约；等模型访问到位时只换实现，不动上下游 [Expert judgment]。
 
@@ -926,7 +926,7 @@ CI 实施要点（M4 W6）：工作流为单文件四 job（web / api / agent / 
 
 | 事项               | 说明                                                                                                       | 状态                                                         |
 | ------------------ | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| 决策模型接入方式与端点 | **阿里云百炼 `decision-model-preview`**（TypeSafe System One 原生格式）。端点 `POST https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone`（业务空间专属域名）或试用域名 `https://trial.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone`；请求为 `state` + `questions`（5 个 `score` + 1 个 `noul` 护栏），`score` 返回 criteria 上的概率加权下标，按档位数线性归一化到 0–10，置信度取返回的 `confidence`。原方案经 TeamoRouter 调用 Jev（同协议）：官方直连需预付 \$5、Vercel AI Gateway 免费档不含 Jev（实测 403）、其免费决策模型限流 5 次/分钟 | 2026-10-12 起：Jev 于 TeamoRouter 下线（持续 503），同日平替为百炼 `decision-model-preview`（同协议，限时免费）并实测通过——单菜 6 问服务端 65–75ms、本地全链路 20 道候选 DONE/NORMAL（`score_mode=DECISION`）；本地与生产默认 `SCORER_MODE=AUTO` |
+| 决策模型接入方式与端点 | **阿里云百炼 `decision-model-preview`**（TypeSafe System One 原生格式）。端点 `POST https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone`（业务空间专属域名）或试用域名 `https://trial.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone`；请求为 `state` + `questions`（5 个 `score` + 1 个 `noul` 护栏），`score` 返回 criteria 上的概率加权下标，按档位数线性归一化到 0–10，置信度取返回的 `confidence`。原方案经 TeamoRouter 调用 Jev（同协议）：官方直连需预付 \$5、Vercel AI Gateway 免费档不含 Jev（实测 403）、其免费决策模型限流 5 次/分钟 | 2026-10-12 起：Jev 于 TeamoRouter 下线（持续 503），同日平替为百炼 `decision-model-preview`（同协议，限时免费）并实测通过——单菜 6 问服务端 65–75ms、本地全链路 20 道候选 DONE/NORMAL（`score_mode=DECISION`）；2026-10-13 候选上限收紧为 5 道后同样 DONE/NORMAL；本地与生产默认 `SCORER_MODE=AUTO` |
 | 生成式模型选型     | 阿里云百炼 qwen3.8：理解器与表达器当前用 max-0902，flash 经 `QWEN_MODEL` 可随时切回                             | 已定并接入（2026-10-06 起用 flash，2026-10-10 切换 max-0902）；成本已按标价计量（PRD §5.8） |
 | Rubric 档位定稿    | 五维各自 2–10 级的措辞需先用 Golden 集验证区分度                                                           | 已定稿：`v1.2`（M3 内产出，评测批跑与稳定性复跑均基于此版本） |
 | 评测样本量         | 校准分桶达到 30 样本所需的人工标注工作量                                                                   | 口径已实现（`sample_size` 驱动，不足不解读）；标注样本随批跑累积 |
