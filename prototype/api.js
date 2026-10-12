@@ -27,7 +27,7 @@
     /**
      * POST /api/agent/decision
      * req: { text: string, context?: object }
-     * → { code: 0, data: { reply, cards } }  —— AI 决策结果（Jev 打分）
+     * → { code: 0, data: { reply, cards } }  —— AI 决策结果（决策模型打分）
      * 当前为原型占位实现，不调用真实模型。
      */
     askAgent: async function (text) {

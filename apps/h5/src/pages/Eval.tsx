@@ -79,7 +79,7 @@ export function Eval() {
           {runMutation.isPending ? '评测中…' : '跑一次全量评测'}
         </button>
         <p className="eval-hero-sub">
-          当前模式：<span className="tag">RULE</span>
+          当前模式：<span className="tag">AUTO</span>
           {goldenCases && <span className="eval-count">{goldenCases.length} 条 Golden 用例</span>}
         </p>
       </section>
