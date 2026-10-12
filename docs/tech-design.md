@@ -252,6 +252,8 @@ Rubric 仓库：档位定义以 YAML 文件维护，带版本号；运行时加�
 | 18  | POST   | `/api/agent/runs/{runId}/refine`   | 修正需求或换一批           | 是   |
 | 19  | GET    | `/api/eval/summary`                | 评测看板指标               | 是   |
 | 20  | GET    | `/api/eval/badcases`               | badcase 列表               | 是   |
+| 21  | GET    | `/api/search`                      | 关键字搜索（商家 / 菜品）  | 是   |
+| 22  | GET    | `/api/eval/cost-summary`           | 单次决策成本摘要（看板）   | 是   |
 
 内部接口（仅业务服务可调，走内网，用服务间令牌鉴权）：
 
@@ -259,6 +261,7 @@ Rubric 仓库：档位定义以 YAML 文件维护，带版本号；运行时加�
 | --- | ---- | ------------------------------------- | ------------------------------------ |
 | I1  | POST | `/internal/decide`                    | 建立一次决策会话并返回 SSE 流        |
 | I1b | POST | `/internal/decide/{runId}/candidates` | 回填约束过滤结果，恢复暂停中的决策图 |
+| I1c | POST | `/internal/decide/{runId}/answers`    | 回填澄清回答，恢复暂停中的澄清节点   |
 | I2  | POST | `/internal/score`                     | 对给定候选打分（可流式返回）         |
 | I3  | POST | `/internal/phrase`                    | 生成推荐理由                         |
 
@@ -312,16 +315,20 @@ Rubric 仓库：档位定义以 YAML 文件维护，带版本号；运行时加�
 
 事件类型：
 
-| event          | 触发时机     | data 关键字段                                                            |
-| -------------- | ------------ | ------------------------------------------------------------------------ |
-| `understand`   | 需求解析完成 | `profile`（PRD 5.2 结构）、`questions[]`、`fromFallback`（是否规则降级） |
-| `filtered`     | 约束过滤完成 | `candidateCount`、`filteredDetail`（各约束命中次数，对齐 PRD 5.3）       |
-| `scoring`      | 打分批次进度 | `done`、`total`、`mode`（`JEV` / `RULE` / `MIXED`）                      |
-| `card`         | 单菜打分完成 | `card`（名称、商家、价格、综合分、五维分、置信度、模式标记）             |
-| `reason.delta` | 理由流式增量 | `dishId`、`text`                                                         |
-| `done`         | 全部完成     | `cards[]`（最终排序）、`latencyMs`、`costYuan`、`rubricVersion`          |
-| `degraded`     | 触发降级     | `level`（`PARTIAL` / `FULL`）、`reason`                                  |
-| `error`        | 无法完成     | `code`、`message`、`retryable`                                           |
+| event              | 触发时机                     | data 关键字段                                                                                                            |
+| ------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `understand`       | 需求解析完成                 | `profile`（PRD 5.2 结构）、`questions[]`、`fromFallback`（是否规则降级）、`clarifyResolved`（二次理解，M4 W2）、`appliedPreferences[]`（本次带入的偏好，M4 W1） |
+| `clarify`          | 信息不足需追问（M4 W2）      | `questions[]`（每题 `id` / `type` / `title` / `options[{id,label,value}]` / `skippable`）、`allowSkip`（恒 true）、`maxQuestions`（本轮问题数，最多 2） |
+| `clarify.resolved` | 追问结束（回答 / 跳过 / 超时） | `skipped`、`reason`（`answered` / `user_skip` / `timeout`）                                                              |
+| `filtered`         | 约束过滤完成                 | `candidateCount`、`filteredDetail`（各约束命中次数，对齐 PRD 5.3）                                                       |
+| `scoring`          | 打分批次进度                 | `done`、`total`、`mode`（`JEV` / `RULE` / `MIXED`）                                                                      |
+| `card`             | 单菜打分完成                 | `card`（名称、商家、价格、综合分、五维分、置信度、模式标记）                                                             |
+| `reason.delta`     | 理由流式增量                 | `dishId`、`text`                                                                                                         |
+| `preference.saved` | 偏好自动沉淀新写或升级（M4 W1） | `items[]`（`id` / `type` / `content`）、`promoted`（是否由观察中升级为启用）                                             |
+| `usage`            | 链路收尾的用量与阶段耗时（M4 W5） | `inputTokens`、`outputTokens`、`jevCalls`、`estimated`、`understandMs`、`scoreMs`、`phraseMs`、`filterWaitMs`         |
+| `done`             | 全部完成                     | `cards[]`（最终排序）、`latencyMs`、`costYuan`、`costBreakdown`（token 与 Jev 调用数）、`rubricVersion`、`degradeLevel`  |
+| `degraded`         | 触发降级                     | `level`（`PARTIAL` / `FULL`）、`reason`                                                                                  |
+| `error`            | 无法完成                     | `code`、`message`、`retryable`                                                                                           |
 
 `seq` 的作用是断线重连时按序号补发，前端只接受比本地更大的序号，避免重复渲染 [Expert judgment]。
 
@@ -330,17 +337,31 @@ Rubric 仓库：档位定义以 YAML 文件维护，带版本号；运行时加�
 | 字段      | 值                                                                                                                                                                     |
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Operation | `GET /api/agent/runs/{runId}`                                                                                                                                          |
-| Success   | `200`；`data: { runId, status, profile, filteredDetail, cards[], lastSeq, latencyMs, costYuan, rubricVersion }`；`status` ∈ `RUNNING` / `DONE` / `FAILED` / `DEGRADED` |
-| 说明      | 前端重连先拉快照对齐，再带 `Last-Event-ID` 续订流                                                                                                                      |
+| Success   | `200`；`data: { runId, status, profile, filteredDetail, cards[], lastSeq, latencyMs, costYuan, rubricVersion, degradeLevel, clarify, clarifyState }`；`status` ∈ `RUNNING` / `DONE` / `FAILED` / `DEGRADED` |
+| 说明      | 前端重连先拉快照对齐，再带 `Last-Event-ID` 续订流；`clarify` 为待答澄清载荷（未追问为 null），`clarifyState` ∈ `PENDING` / `ANSWERED` / `SKIPPED`（M4 W2）。`RUNNING + PENDING` 表示正处于等待澄清：前端恢复追问卡并续订流，而非按「连接中断」处理 |
 
 **接口 18 · 修正与换一批**
 
 | 字段      | 值                                                                                                              |
 | --------- | --------------------------------------------------------------------------------------------------------------- |
 | Operation | `POST /api/agent/runs/{runId}/refine`                                                                           |
-| Request   | `type`（`REFINE` / `NEXT_BATCH`）、`text`（`REFINE` 时必填）、`excludeDishIds`（`NEXT_BATCH` 时传已展示的菜品） |
-| Success   | `200`；`data: { runId }`（新 run，继承原 run 的偏好基线）                                                       |
-| 说明      | `REFINE` 产生新 run 但复用未受影响菜品的打分缓存；`NEXT_BATCH` 只取候选中的下一组                               |
+| Request   | `type`（`REFINE` / `NEXT_BATCH`）、`text`（`REFINE` 时必填）、`excludeDishIds`（`NEXT_BATCH` 时传已展示的菜品）、`pageSize`（`NEXT_BATCH` 可选，默认 4、上限 20） |
+| Success   | `200`；`data: RefineResponse`——`REFINE` → `{ runId（新）, streamUrl, cards: null, hasMore: null }`；`NEXT_BATCH` → `{ runId（原）, streamUrl: null, cards[], hasMore }` |
+| Error     | `404 RUN_NOT_FOUND`、`409 RUN_NOT_DONE`（父 run 未完成）、`400 EMPTY_TEXT` / `TEXT_TOO_LONG` / `INVALID_PARAM`、`429 TOO_MANY_RUNS` |
+| 说明      | `REFINE` 新建继承 run（落 `parent_run_id`，继承原 run 的 mode / merchantId 与带入偏好；文本 = 原话 + 修正），走完整理解与 SSE，未受影响菜品的打分自然复用缓存；`NEXT_BATCH` 同 run 直接读已落库候选重建卡片（排除 `excludeDishIds`、按 `rank_no` 取下一组），零模型成本、无 SSE 秒回，`hasMore=false` 表示候选已看完 |
+
+**接口 I1c · 澄清回答回填（协作式编排的续接调用）**
+
+| 字段      | 值                                                                                             |
+| --------- | ---------------------------------------------------------------------------------------------- |
+| Operation | `POST /internal/decide/{runId}/answers`                                                        |
+| Auth      | 服务间令牌（请求头 `X-Internal-Token`）                                                        |
+| Request   | `answers[{ questionId, optionId \| null }]`、`skipped`（整轮跳过）                              |
+| Success   | `200`；`{ accepted: true }`                                                                    |
+| Error     | `404` 未知或已结束的 run；`409` 该 run 当前不在澄清等待态                                      |
+| 对外封装  | `POST /api/agent/runs/{runId}/answers`（入参相同）；错误码 `404 RUN_NOT_FOUND`、`409 CLARIFY_NOT_PENDING` |
+
+决策图在澄清节点暂停等待该调用（最多 2 问、每 run 一轮，60s 无回答按超时收口）。业务服务收到 `clarify` 后落库 `clarify_json` / `clarify_state=PENDING` 并转发，用户提交后回填；回答合并只补缺失字段（口味取并集、预算仅在为空时写入），随后二次 `understand`（`clarifyResolved: true`）继续过滤打分；跳过 / 超时则 `profile` 不变，发 `clarify.resolved` 后正常出结果。外观与 I1b 相同：调用仍由业务服务发起，Agent 不反向访问业务数据。
 
 **接口 I2 · 内部打分**
 
@@ -395,6 +416,8 @@ erDiagram
 
 表结构按业务视角给出关键字段，完整 DDL 在实现阶段补充。
 
+M4 增量列（`preference.seen_count` / `last_seen_run_id`、`decision_run.applied_preference_ids` / `parent_run_id` / `clarify_json` / `clarify_state`、`decision_candidate.reason`）由 `deploy/sql/11_m4_alter.sql` 幂等追加（`information_schema.columns` 判断的动态 SQL，可重复执行）：`10_schema.sql` 全是 `CREATE TABLE IF NOT EXISTS`，对既有库不会追加新列，M4 变更必须走独立 alter 脚本。
+
 **visitor_session（游客会话）**
 
 | 字段           | 类型        | 约束     | 说明                 |
@@ -437,7 +460,11 @@ erDiagram
 | candidate_count     | int          | NOT NULL     | 过滤后候选数                               |
 | filtered_detail     | json         | NULL         | 各约束命中次数                             |
 | latency_ms          | int          | NULL         | 端到端耗时                                 |
-| cost_yuan           | decimal(8,5) | NULL         | 模型调用成本                               |
+| cost_yuan           | decimal(8,5) | NULL         | 模型调用成本（M4 W5 起为标价口径实算）     |
+| parent_run_id       | varchar(32)  | NULL         | `REFINE` 继承来源 run（接口 18）           |
+| applied_preference_ids | json      | NULL         | 本次带入的偏好 id（快照恢复与 `REFINE` 继承基线） |
+| clarify_json        | json         | NULL         | 待答澄清问题载荷（快照恢复追问卡）         |
+| clarify_state       | varchar(16)  | NULL         | `PENDING` / `ANSWERED` / `SKIPPED`         |
 | created_at          | datetime     | NOT NULL     | 创建时间                                   |
 
 **decision_score（逐菜各维度分）**
@@ -465,6 +492,7 @@ erDiagram
 | rank_no              | int          | 最终名次（由代码排序写入） |
 | is_shown             | tinyint      | 是否展示给用户             |
 | is_added_to_cart     | tinyint      | 是否被加购（采纳指标来源） |
+| reason               | varchar(64)  | 推荐理由（≤30 字；落库供快照恢复与换一批重建卡片，M4 W1/W3） |
 
 **其余实体**
 
@@ -472,7 +500,7 @@ erDiagram
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | merchant         | `id, name, logo_url, rating, monthly_sales, delivery_minutes, distance_meters, min_order_amount, delivery_fee, is_open, notice, rank_label` | 商家；`is_open` 供营业状态约束使用                                         |
 | merchant_tag     | `merchant_id, tag, tag_type`                                                                                                                | 商家标签，`tag_type` 区分营销标签与特色标签                                |
-| preference       | `id, session_id, type, content, source, status`                                                                                             | 偏好记忆；`type` ∈ 口味 / 预算 / 忌口 / 场景，`source` ∈ `AUTO` / `MANUAL` |
+| preference       | `id, session_id, type, content, source, status, seen_count, last_seen_run_id`                                                                                             | 偏好记忆；`type` ∈ 口味 / 预算 / 忌口 / 场景，`source` ∈ `AUTO` / `MANUAL`；`status` ∈ `ACTIVE` / `PENDING`（观察中）/ `IGNORED`（墓碑软删，可手动恢复，不物理删除）；`seen_count` 为跨 run 观测次数（口味 / 预算 / 场景在两个不同 run 重复出现才升级 `ACTIVE`，`last_seen_run_id` 防同 run 重复计数，M4 W1） |
 | cart_item        | `id, session_id, dish_id, spec_text, spec_hash, quantity, unit_price`                                                                       | 购物车条目；`spec_hash` 用于「菜品 + 规格」唯一性判定                      |
 | dish_tag         | `dish_id, tag, tag_type`                                                                                                                    | 菜品标签，承载辣度、口味、食材、健康等维度，是约束与打分的主要输入         |
 | dish_spec_group  | `id, dish_id, group_name, is_required, sort_no`                                                                                             | 规格分组（份量、加料）                                                     |
@@ -556,7 +584,7 @@ graph TD
 
 读取方式：实线是正常路径，虚线是降级路径。追问形成一次回环，由「最多 2 问」的计数器约束，不会无限循环；打分节点内部按菜品粒度重试，单菜失败不影响整批（§6.2）。每个节点都有明确失败出口：理解失败走规则解析、打分失败转规则分、理由失败转模板。LangGraph 的 checkpointer 在本项目关闭——一次决策是有界执行，run 状态由业务服务写入 MySQL 并同步 Redis 进度流（§5.3），让断线恢复的 seq 口径只有一个来源。
 
-图的执行是协作式的：业务服务经 I1 建立 SSE 流后，图在「筛选候选」节点暂停，业务服务执行约束引擎并通过 I1b 回填候选，图从该点继续；图中标注「业务服务」的加权排序同样由业务服务在收流过程中完成。事件只有一个出口：Agent 产出 `understand` / `scoring` / `card` / `reason.delta`，业务服务在转发前后补上 `filtered`（掌握过滤明细）、`done`（掌握加权公式、并列判定与落库口径）与 `error` / `degraded`，`seq` 由业务服务统一编号。这样「模型负责语义、代码负责确定性与账本」的边界落实在事件层，而不是停留在分工描述上 [Expert judgment]。
+图的执行是协作式的：业务服务经 I1 建立 SSE 流后，图在「筛选候选」节点暂停，业务服务执行约束引擎并通过 I1b 回填候选，图从该点继续；图中标注「业务服务」的加权排序同样由业务服务在收流过程中完成。事件只有一个出口：Agent 产出 `understand` / `clarify` / `clarify.resolved` / `scoring` / `card` / `reason.delta` / `usage`，业务服务在转发前后补上 `filtered`（掌握过滤明细）、`done`（掌握加权公式、并列判定与落库口径）、`preference.saved`（掌握偏好写入口径）与 `error` / `degraded`，`seq` 由业务服务统一编号。这样「模型负责语义、代码负责确定性与账本」的边界落实在事件层，而不是停留在分工描述上 [Expert judgment]。
 
 ### 6.1 降级状态机
 
@@ -809,7 +837,7 @@ networks:
 | `services/agent/**` | mealmind-agent             |
 | `deploy/**`         | 只同步 compose，不重建镜像 |
 
-单服务 job 的步骤：跑该侧测试（H5 lint 与构建、Java 单元测试、Python 测试）→ 构建镜像 → 推送 `ghcr.io/<owner>/mealmind-<服务>` 的 `<sha>` 与 `latest` 双 tag（开启构建缓存）→ 同步 compose → SSH 部署：
+单服务 job 的步骤：跑该侧检查（按各侧现状：H5 `npm ci && npm run lint && npm run build`；biz `mvn -B package`（暂无单测）；agent `python -m compileall app`（暂无 pytest））→ 构建镜像 → 推送 `ghcr.io/<owner>/mealmind-<服务>` 的 `<sha>` 与 `latest` 双 tag（构建缓存 `cache-from/to: type=gha`）→ 同步 compose → SSH 部署：
 
 ```bash
 rsync -az deploy/ <user>@<server>:/opt/mealmind/deploy/ --exclude .env
@@ -823,6 +851,8 @@ ssh <user>@<server> "cd /opt/mealmind && \
 仓库需配置（Environment `production`）：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_PRIVATE_KEY`、`DEPLOY_KNOWN_HOSTS`（预先核验的 host key，禁止运行时 `ssh-keyscan`）、variable `DEPLOY_PATH=/opt/mealmind`；GHCR 登录用 Actions 内置 `GITHUB_TOKEN`（仓库需允许 Actions 写 Packages）。服务器上的 `deploy` 用户、docker 组与 rsync 在基础设施阶段已就绪，无需重复配置。
 
 服务器到 `ghcr.io` 的连通性已实测通过（2026-10-03：HTTPS 可达，docker 鉴权拉取 manifest 正常），不需要备用镜像仓库方案。
+
+CI 实施要点（M4 W6）：工作流为单文件四 job（web / api / agent / deploy），`push main` 与 `workflow_dispatch` 触发，paths 过滤同上表；GHCR 镜像名中的 owner 必须全小写——`github.repository_owner` 经 `tr '[:upper:]' '[:lower:]'` 转换后再引用，直接使用大写 owner 是首跑最常见的失败原因；`deploy/**` 变更只同步 compose（含通知 deploy job）、不重建镜像；三侧镜像均推送 `<sha>` 与 `latest` 双 tag，部署与回滚都可用 SHA 定位。
 
 ### 8.4 非功能设计
 
@@ -842,7 +872,7 @@ ssh <user>@<server> "cd /opt/mealmind && \
 
 | 配置                        | 说明                          | 默认                               |
 | --------------------------- | ----------------------------- | ---------------------------------- |
-| `scorer.mode`               | `JEV` / `RULE` / `AUTO`       | `AUTO`                             |
+| `scorer.mode`               | `JEV` / `RULE` / `AUTO`       | `RULE`（2026-10-12 起默认；Jev 下线，见 §11） |
 | `scorer.batch-size`         | 单批打分菜品数                | 5                                  |
 | `scorer.max-candidates`     | 参与打分的候选上限            | 20                                 |
 | `degrade.partial-threshold` | 触发部分降级的失败率          | 0.3                                |
@@ -851,9 +881,14 @@ ssh <user>@<server> "cd /opt/mealmind && \
 | `phrase.timeout-s`          | 表达器单批调用超时            | 4                                  |
 | `jev.timeout-s`             | Jev 单菜打分超时              | 3                                  |
 | `jev.proxy-url`             | Jev 出网代理（本地直连不通时）| 空（生产可直连）                   |
-| `qwen.model`                | 生成式模型 ID                 | `qwen3.8-flash`（关闭思考模式）    |
-| `run.timeout-ms`            | 整轮决策超时                  | 12000                              |
+| `qwen.model`                | 生成式模型 ID                 | `qwen3.8-max-0902`（关闭思考模式，flash 经 `QWEN_MODEL` 切回） |
+| `run.timeout-ms`            | 整轮决策超时                  | 12000（`RUN_TIMEOUT_MS` 可覆盖）   |
+| `clarify.timeout-ms`        | 澄清等待窗口（M4 W2，收到 clarify 后整轮超时换档为 run + clarify） | 60000（`CLARIFY_TIMEOUT_MS` 可覆盖） |
 | `run.cost-budget-yuan`      | 单 run 模型成本上限           | 0.02                               |
+| `cost.qwen-input-per-million` | 生成式输入单价（元/百万 token） | 12 |
+| `cost.qwen-output-per-million` | 生成式输出单价（元/百万 token） | 36 |
+| `cost.jev-per-call`         | Jev 单次调用单价（元）        | 0.0003                             |
+| `cost.gate-yuan`            | 单次决策成本门限（看板）      | 0.01                               |
 | `rubric.version`            | 当前档位版本                  | `v1.2`                             |
 | `agent.base-url`            | 业务服务访问 Agent 的内部地址 | `http://mealmind-agent:8000`       |
 | `db.url`                    | 共享 MySQL 连接               | `jdbc:mysql://mysql:3306/mealmind` |
@@ -879,12 +914,12 @@ ssh <user>@<server> "cd /opt/mealmind && \
 
 与 PRD 8.3 的里程碑对齐，补充技术侧依赖：
 
-| 阶段          | 技术侧内容                                                                                                                                        | 完成标志                            |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| M1 平台骨架   | 三容器 compose 打通（本地 + 接入 `infra-net`）；MySQL 建库建表；种子数据脚本（固定随机种子）；商家与菜单接口；游客会话与购物车接口；H5 骨架页对接 | 登录 → 浏览 → 加购 全链路可用       |
-| M2 决策链路   | LangGraph 状态图骨架；SSE 协议实现；约束引擎；`RuleScorer` 先接（不依赖外部模型即可跑通）；H5 会话页对接                                          | 一句需求出带分卡片，全程走规则分    |
-| M3 评测与降级 | `JevScorer` 接入；qwen3.8 理解器/表达器接入（保留关键字/模板降级）；降级状态机与打分缓存；Golden 集（≈50 条）与评测执行器；看板接口与页面 | Go/No-Go 全项可测，双通道可切换演示 |
-| M4 打磨上线   | 偏好记忆接口、追问策略、断线恢复、埋点补全、GitHub Actions 流水线接入与公网部署                                                                   | 公网可访问，演示动线顺畅            |
+| 阶段          | 技术侧内容                                                                                                                                        | 完成标志                            | 状态（2026-10-12） |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ------------------ |
+| M1 平台骨架   | 三容器 compose 打通（本地 + 接入 `infra-net`）；MySQL 建库建表；种子数据脚本（固定随机种子）；商家与菜单接口；游客会话与购物车接口；H5 骨架页对接 | 登录 → 浏览 → 加购 全链路可用       | ✅ 已完成          |
+| M2 决策链路   | LangGraph 状态图骨架；SSE 协议实现；约束引擎；`RuleScorer` 先接（不依赖外部模型即可跑通）；H5 会话页对接                                          | 一句需求出带分卡片，全程走规则分    | ✅ 已完成          |
+| M3 评测与降级 | `JevScorer` 接入；qwen3.8 理解器/表达器接入（保留关键字/模板降级）；降级状态机与打分缓存；Golden 集（≈50 条）与评测执行器；看板接口与页面 | Go/No-Go 全项可测，双通道可切换演示 | ✅ 已完成（实测见 PRD §7.5） |
+| M4 打磨上线   | 偏好记忆接口与 `/mine`；追问链路（clarify 节点 + answers 端点）；接口 18（REFINE / NEXT_BATCH）；搜索接口与 `/search`；动效打磨；`cost_yuan` 计量（标价口径 + 阶段耗时）；GitHub Actions 流水线接入与公网部署 | 公网可访问，演示动线顺畅            | 🚧 功能部分（W1–W5）已完成；CI 与公网部署待 W6 |
 
 把 `RuleScorer` 排在 `JevScorer` 之前，是因为规则通道能让整条链路在不依赖外部模型的情况下先跑通并固定住接口契约；等 Jev 访问到位时只换实现，不动上下游 [Expert judgment]。
 
@@ -892,7 +927,7 @@ ssh <user>@<server> "cd /opt/mealmind && \
 
 | 事项               | 说明                                                                                                       | 状态                                                         |
 | ------------------ | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Jev 接入方式与端点 | **经 TeamoRouter 调用**（TypeSafe 原生格式）。端点 `POST https://api.teamorouter.com/v1/systemone`，模型 `jev`；请求为 `state` + `questions`（5 个 `score` + 1 个 `noul` 护栏），`score` 返回 criteria 上的 0 基插值下标，按档位数线性归一化到 0–10，置信度取返回的 `confidence`。选它是因为：官方直连需预付 \$5、Vercel AI Gateway 免费档不含 Jev（实测 403）、其免费决策模型限流 5 次/分钟（20 道候选要 4 分钟） | 已定并**联调通过**（2026-10-10）：单菜打分、5 并发、整链路与 PARTIAL 单菜降级均实测正常 |
-| 生成式模型选型     | 阿里云百炼 qwen3.8：理解器与表达器默认 flash，max 经配置切换                                               | 已定（2026-10-06）；待百炼 API key 到位                      |
-| Rubric 档位定稿    | 五维各自 2–10 级的措辞需先用 Golden 集验证区分度                                                           | M3 内产出                                                    |
-| 评测样本量         | 校准分桶达到 30 样本所需的人工标注工作量                                                                   | M3 内产出                                                    |
+| Jev 接入方式与端点 | **经 TeamoRouter 调用**（TypeSafe 原生格式）。端点 `POST https://api.teamorouter.com/v1/systemone`，模型 `jev`；请求为 `state` + `questions`（5 个 `score` + 1 个 `noul` 护栏），`score` 返回 criteria 上的 0 基插值下标，按档位数线性归一化到 0–10，置信度取返回的 `confidence`。选它是因为：官方直连需预付 \$5、Vercel AI Gateway 免费档不含 Jev（实测 403）、其免费决策模型限流 5 次/分钟（20 道候选要 4 分钟） | 已定并**联调通过**（2026-10-10）：单菜打分、5 并发、整链路与 PARTIAL 单菜降级均实测正常。**2026-10-12 起 TeamoRouter 侧模型下线（持续 503）**：本地与生产默认 `SCORER_MODE=RULE`（规则分 = M2 基线；RULE 下 run 记 DONE/NORMAL、无降级横幅），通道保留，模型恢复后改回 `AUTO` 即可；需演示降级横幅时临时切 `AUTO`——Jev 不可用会直接落 FULL 档 |
+| 生成式模型选型     | 阿里云百炼 qwen3.8：理解器与表达器当前用 max-0902，flash 经 `QWEN_MODEL` 可随时切回                             | 已定并接入（2026-10-06 起用 flash，2026-10-10 切换 max-0902）；成本已按标价计量（PRD §5.8） |
+| Rubric 档位定稿    | 五维各自 2–10 级的措辞需先用 Golden 集验证区分度                                                           | 已定稿：`v1.2`（M3 内产出，评测批跑与稳定性复跑均基于此版本） |
+| 评测样本量         | 校准分桶达到 30 样本所需的人工标注工作量                                                                   | 口径已实现（`sample_size` 驱动，不足不解读）；标注样本随批跑累积 |
