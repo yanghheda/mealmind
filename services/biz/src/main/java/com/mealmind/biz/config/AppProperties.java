@@ -64,7 +64,7 @@ public class AppProperties {
         this.cost = cost;
     }
 
-    /** 计价参数：qwen 按每百万 token 单价，Jev 按每次调用单价；gate 为单次决策成本门限。 */
+    /** 计价参数：qwen 按每百万 token 单价，决策模型按每次调用单价；gate 为单次决策成本门限。 */
     public static class Cost {
 
         /** qwen 输入单价（元 / 百万 token）。 */
@@ -73,8 +73,8 @@ public class AppProperties {
         /** qwen 输出单价（元 / 百万 token）。 */
         private BigDecimal qwenOutputPerMillion = new BigDecimal("36");
 
-        /** Jev 单次调用单价（元）。 */
-        private BigDecimal jevPerCall = new BigDecimal("0.0003");
+        /** 决策模型单次调用单价（元）；decision-model-preview 限时免费，恢复计费后按官方单价更新。 */
+        private BigDecimal decisionPerCall = BigDecimal.ZERO;
 
         /** 单次决策成本门限（元）：看板 overGate 判定。 */
         private BigDecimal gateYuan = new BigDecimal("0.01");
@@ -95,12 +95,12 @@ public class AppProperties {
             this.qwenOutputPerMillion = qwenOutputPerMillion;
         }
 
-        public BigDecimal getJevPerCall() {
-            return jevPerCall;
+        public BigDecimal getDecisionPerCall() {
+            return decisionPerCall;
         }
 
-        public void setJevPerCall(BigDecimal jevPerCall) {
-            this.jevPerCall = jevPerCall;
+        public void setDecisionPerCall(BigDecimal decisionPerCall) {
+            this.decisionPerCall = decisionPerCall;
         }
 
         public BigDecimal getGateYuan() {

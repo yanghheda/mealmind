@@ -217,7 +217,7 @@ CREATE TABLE IF NOT EXISTS decision_score (
   value        decimal(4,2) NOT NULL COMMENT '0–10',
   confidence   decimal(4,3) NOT NULL COMMENT '0–1',
   distribution json         DEFAULT NULL COMMENT '档位概率分布',
-  score_mode   varchar(8)   NOT NULL COMMENT 'JEV / RULE',
+  score_mode   varchar(8)   NOT NULL COMMENT 'DECISION / RULE',
   PRIMARY KEY (id),
   UNIQUE KEY uk_run_dish_dim (run_id, dish_id, dim),
   KEY idx_run_dish (run_id, dish_id),
