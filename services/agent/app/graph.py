@@ -167,9 +167,10 @@ async def _score(state: DecisionState) -> DecisionState:
     )
     scored: list[tuple[Candidate, CandidateScore]] = []
     primary_mode = router.primary_mode
-    # FULL 档冷却期内不发探测（整轮走规则分）：这一轮既不算失败也不写回控制器。
-    # 否则每轮都会因 mode≠primary 被判为「探测失败」而重置冷却——持续流量下永远无法自动恢复。
-    attempted = primary_mode is not None and router.controller.should_attempt_primary()
+    # 本轮是否真正尝试主通道：RULE 模式、未接入主通道、FULL 档冷却期内都整轮走规则分，
+    # 该轮既不算失败也不写回控制器。若把「设计内走规则分」也算失败，RULE 模式会被
+    # 整轮误判为 FULL 降级；而冷却期内误判则会每轮重置冷却，使 FULL 永远无法自动恢复。
+    attempted = router.uses_primary
     failed = 0
 
     for start in range(0, total, _SCORE_BATCH_SIZE):

@@ -188,6 +188,16 @@ class ScorerRouter:
 
         return self._primary.mode if self._use_primary() else self._fallback.mode
 
+    @property
+    def uses_primary(self) -> bool:
+        """本轮是否真正尝试主通道（RULE 模式恒为 False）。
+
+        与 `_use_primary` 同源：只有真去调主通道了，逐菜回退规则分才算「失败」；
+        强制 RULE 是设计内的对照通道，不能计入失败率（否则整轮被误判为 FULL 降级）。
+        """
+
+        return self._use_primary()
+
     def score(self, candidate: Candidate, profile: Profile, context: ScoringContext) -> CandidateScore:
         if self._use_primary():
             try:
@@ -209,4 +219,7 @@ def resolve_primary():
 
 
 router = ScorerRouter(resolve_primary(), scorer, degrade_controller)
-degrade_controller.set_channel_available("scorer", router.primary_mode is not None)
+# 强制 RULE 时不登记打分通道：该模式下永远不会调主通道，不算「接入了一条模型通道」
+degrade_controller.set_channel_available(
+    "scorer", router.primary_mode is not None and settings.scorer_mode != "RULE"
+)
