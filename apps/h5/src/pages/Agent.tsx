@@ -14,7 +14,7 @@ import {
   fetchPreferences,
   preferenceLabel,
 } from '../api/preferences'
-import { CARD_PAGE_SIZE, useAgentSession } from '../hooks/useAgentSession'
+import { useAgentSession } from '../hooks/useAgentSession'
 import type { RunBlock } from '../hooks/useAgentSession'
 import { CART_QUERY_KEY, useCart } from '../hooks/useCart'
 import { flyToCart } from '../lib/flyToCart'
@@ -64,7 +64,6 @@ export function Agent() {
   const [savedNotice, setSavedNotice] = useState<PreferenceSavedEvent | null>(null)
   const [specDish, setSpecDish] = useState<DishView | null>(null)
   const sourceRef = useRef<HTMLElement | null>(null)
-  const chatRef = useRef<HTMLDivElement | null>(null)
 
   const handlePreferenceSaved = useCallback(
     (event: PreferenceSavedEvent) => {
@@ -96,13 +95,13 @@ export function Agent() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: CART_QUERY_KEY }),
   })
 
+  // 运行中跟随最新进度滚到底部；整轮完成 / 换一批不再滚到底部，由结果区自行对齐到第一张卡
   useEffect(() => {
-    const node = chatRef.current
-    if (!node) return
+    if (!busy) return
     window.requestAnimationFrame(() => {
       window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
     })
-  }, [blocks])
+  }, [blocks, busy])
 
   useEffect(() => {
     if (!savedNotice) return
@@ -197,7 +196,7 @@ export function Agent() {
           </span>
         </div>
 
-        <div className="chat" ref={chatRef}>
+        <div className="chat">
           {blocks.length === 0 && (
             <Welcome
               merchantName={merchantQuery.data?.name}
@@ -368,9 +367,18 @@ function RunBlockView({
   onAdd: (card: DecisionCard, event: MouseEvent<HTMLButtonElement>) => void
   onAnswer: (answers: ClarifyAnswer[], skipped: boolean) => void
 }) {
-  // 打分中只露首屏；done 后由「换一批」按页替换展示（走服务端接口 18）
-  const visible = block.phase === 'running' ? block.cards.slice(0, CARD_PAGE_SIZE) : block.cards
+  // 卡片整轮完成（done）后才展示：打分 / 生成理由阶段只保留进度卡，避免半成品结果
+  const visible = block.phase === 'done' ? block.cards : []
   const hasMore = block.phase === 'done' && block.hasMore
+  const resultsRef = useRef<HTMLDivElement | null>(null)
+
+  // 结果（完成 / 换一批）出现时把结果区对齐到视口顶部：用户从第一张卡往下看，不再滚到底部
+  useEffect(() => {
+    if (block.phase !== 'done' || block.cards.length === 0) return
+    window.requestAnimationFrame(() => {
+      resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }, [block.phase, block.cards])
 
   return (
     <>
@@ -473,15 +481,11 @@ function RunBlockView({
       )}
 
       {visible.length > 0 && (
-        <div className="results">
+        <div className="results" ref={resultsRef}>
           <div className="results-head">
             <h3>
               为你推荐
-              <span className="results-sub">
-                {block.phase === 'done'
-                  ? `共 ${block.totalCount} 道候选`
-                  : '打分中…'}
-              </span>
+              <span className="results-sub">共 {block.totalCount} 道候选</span>
             </h3>
             {hasMore && (
               <button className="refresh-btn" type="button" onClick={onNextBatch}>
