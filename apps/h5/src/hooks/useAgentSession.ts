@@ -16,8 +16,6 @@ import type {
 } from '../api/agent'
 import type { AppliedPreference } from '../api/preferences'
 
-export const CARD_PAGE_SIZE = 4
-
 export type StepKey = 'understand' | 'filter' | 'score' | 'phrase'
 
 export interface ProgressStep {
@@ -42,15 +40,11 @@ export interface RunBlock {
   degradeLevel: DegradeLevel
   filtered: FilteredEvent | null
   scoring: ScoringEvent | null
-  /** 打分阶段逐步到达；done 后为首屏一批，换一批按页替换展示。 */
+  /** 打分阶段逐步到达；done 后全量展示（结果区横向滚动查看，不再分页）。 */
   cards: DecisionCard[]
   reasons: Record<string, string>
   error: ErrorEvent | null
   relaxOptions: RelaxOption[]
-  /** done 时的候选总数（换一批按页替换，卡片列表只保留当前一批）。 */
-  totalCount: number
-  /** 是否还有未展示过的候选（done 时按总数判断，之后由服务端换一批接口更新）。 */
-  hasMore: boolean
   /** 是否由「修正」发起（UI 标注「基于上一条需求」）。 */
   refined: boolean
   latencyMs: number | null
@@ -98,8 +92,6 @@ function initialBlock(id: string, text: string, refined = false): RunBlock {
     reasons: {},
     error: null,
     relaxOptions: [],
-    totalCount: 0,
-    hasMore: false,
     refined,
     latencyMs: null,
   }
@@ -120,8 +112,6 @@ export function useAgentSession(
   const phases = useRef(new Map<string, RunBlock['phase']>())
   /** 块 → runId（提交澄清回答时定位 run）。 */
   const runIds = useRef(new Map<string, string>())
-  /** 块 → 已展示过的菜品 id 集合：换一批按此排除，保证替换后不与历史卡片重复。 */
-  const shownDishIds = useRef(new Map<string, Set<string>>())
   /** 已自动续订过流的块：澄清期间断流只自动恢复一次，避免断流循环（W2）。 */
   const resumed = useRef(new Set<string>())
   /** 指向最新的 recover（subscribe 的关闭/异常回调需要它，避免与 recover 循环依赖）。 */
@@ -220,16 +210,10 @@ export function useAgentSession(
         }
         case 'done': {
           const payload = data as DoneEvent
-          const all = payload.cards ?? []
-          // 首屏只展示前 CARD_PAGE_SIZE 张；后续候选由「换一批」按页替换（已展示集合用于排除去重）
-          const firstPage = all.slice(0, CARD_PAGE_SIZE)
-          shownDishIds.current.set(blockId, new Set(firstPage.map((card) => card.dishId)))
           patch(blockId, (block) => ({
             ...block,
             phase: 'done',
-            cards: firstPage,
-            totalCount: all.length,
-            hasMore: all.length > CARD_PAGE_SIZE,
+            cards: payload.cards ?? [],
             relaxOptions: payload.relaxOptions ?? [],
             latencyMs: payload.latencyMs,
             degradeLevel: payload.degradeLevel ?? block.degradeLevel,
@@ -286,16 +270,11 @@ export function useAgentSession(
       try {
         const snapshot = await fetchRunSnapshot(runId)
         if (snapshot.status === 'DONE' || snapshot.status === 'DEGRADED') {
-          const all = snapshot.cards ?? []
-          const firstPage = all.slice(0, CARD_PAGE_SIZE)
-          shownDishIds.current.set(blockId, new Set(firstPage.map((card) => card.dishId)))
           patch(blockId, (block) => ({
             ...block,
             phase: 'done',
             profile: block.profile ?? snapshot.profile,
-            cards: firstPage,
-            totalCount: all.length,
-            hasMore: all.length > CARD_PAGE_SIZE,
+            cards: snapshot.cards ?? [],
             latencyMs: snapshot.latencyMs,
             degradeLevel: snapshot.degradeLevel ?? block.degradeLevel,
             steps: block.steps.map((step) => ({ ...step, status: 'done' as const })),
@@ -395,51 +374,6 @@ export function useAgentSession(
   )
 
   /**
-   * 换一批（接口 18 NEXT_BATCH）：同 run 从服务端取下一组（排除已展示过的候选，保证不重复），
-   * 用下一组替换当前这一批（PRD：替换而非累加），零模型成本、秒回。
-   * 返回服务端 hasMore（false = 已看完所有候选）；请求失败返回 null，由调用方提示。
-   */
-  const nextBatch = useCallback(
-    async (blockId: string): Promise<{ hasMore: boolean } | null> => {
-      const runId = runIds.current.get(blockId)
-      if (!runId) return null
-      const excludeDishIds = Array.from(shownDishIds.current.get(blockId) ?? [])
-      try {
-        const page = await refineRun(runId, {
-          type: 'NEXT_BATCH',
-          excludeDishIds,
-          pageSize: CARD_PAGE_SIZE,
-        })
-        const cards = page.cards ?? []
-        if (cards.length > 0) {
-          const shown = shownDishIds.current.get(blockId) ?? new Set<string>()
-          for (const card of cards) {
-            shown.add(card.dishId)
-          }
-          shownDishIds.current.set(blockId, shown)
-        }
-        patch(blockId, (block) => {
-          const reasons = { ...block.reasons }
-          for (const card of cards) {
-            if (card.reason) reasons[card.dishId] = card.reason
-          }
-          return {
-            ...block,
-            // 替换当前一批；已无更多候选时保留当前展示，由调用方提示「已看完所有候选」
-            cards: cards.length > 0 ? cards : block.cards,
-            reasons,
-            hasMore: Boolean(page.hasMore),
-          }
-        })
-        return { hasMore: Boolean(page.hasMore) }
-      } catch {
-        return null
-      }
-    },
-    [patch],
-  )
-
-  /**
    * 修正（接口 18 REFINE）：基于原 block 的 run 新建继承 run；块内展示本次修正，
    * 提交文本由服务端拼接「原话 + 修正」，模式与带入偏好一并继承。
    */
@@ -478,11 +412,10 @@ export function useAgentSession(
     aborts.current.clear()
     phases.current.clear()
     runIds.current.clear()
-    shownDishIds.current.clear()
     resumed.current.clear()
     setBlocks([])
   }, [])
 
   const busy = blocks.some((block) => block.phase === 'running')
-  return { blocks, busy, submit, answer, nextBatch, refine, reset }
+  return { blocks, busy, submit, answer, refine, reset }
 }

@@ -70,7 +70,7 @@ mealmind:
       timeliness: 0.15
       reputation: 0.20
       scene: 0.10
-    max-candidates: 20
+    max-candidates: 5
     # 整轮决策超时；可用 RUN_TIMEOUT_MS 覆盖（决策模型与 qwen 均公网直连，12s 为兜底）
     run-timeout-ms: ${RUN_TIMEOUT_MS:12000}
     # 澄清等待窗口（毫秒）：收到 clarify 后整轮超时换档为 run-timeout + clarify-timeout（M4 W2）

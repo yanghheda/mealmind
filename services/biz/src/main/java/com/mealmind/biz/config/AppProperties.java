@@ -123,8 +123,8 @@ public class AppProperties {
                 "reputation", new BigDecimal("0.20"),
                 "scene", new BigDecimal("0.10")));
 
-        /** 参与打分的候选上限（超过按评分与月售初排截断）。 */
-        private int maxCandidates = 20;
+        /** 参与打分的候选上限（超过按评分与月售初排截断；结果区横向滚动展示，5 条为演示口径）。 */
+        private int maxCandidates = 5;
 
         /** 整轮决策超时（毫秒），超时返回已得结果 + error。 */
         private int runTimeoutMs = 12000;

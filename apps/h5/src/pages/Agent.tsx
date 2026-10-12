@@ -73,7 +73,7 @@ export function Agent() {
     [queryClient],
   )
 
-  const { blocks, busy, submit, answer, nextBatch, refine, reset } = useAgentSession(
+  const { blocks, busy, submit, answer, refine, reset } = useAgentSession(
     merchantId ? 'MERCHANT' : 'GLOBAL',
     merchantId,
     { onPreferenceSaved: handlePreferenceSaved },
@@ -95,7 +95,7 @@ export function Agent() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: CART_QUERY_KEY }),
   })
 
-  // 运行中跟随最新进度滚到底部；整轮完成 / 换一批不再滚到底部，由结果区自行对齐到第一张卡
+  // 运行中跟随最新进度滚到底部；整轮完成后不再滚到底部，由结果区自行对齐到第一张卡
   useEffect(() => {
     if (!busy) return
     window.requestAnimationFrame(() => {
@@ -136,14 +136,6 @@ export function Agent() {
       void queryClient.invalidateQueries({ queryKey: PREFERENCE_QUERY_KEY })
       showToast('已撤销记忆')
     })()
-  }
-
-  /** 换一批（接口 18 NEXT_BATCH）：服务端按已展示集合取下一组并替换当前批次，秒回。 */
-  const handleNextBatch = (block: RunBlock) => {
-    void nextBatch(block.id).then((result) => {
-      if (!result) showToast('换一批失败，请重试')
-      else if (!result.hasMore) showToast('已看完所有候选')
-    })
   }
 
   const handleAdd = (card: DecisionCard, event: MouseEvent<HTMLButtonElement>) => {
@@ -209,7 +201,6 @@ export function Agent() {
               key={block.id}
               block={block}
               busy={busy}
-              onNextBatch={() => handleNextBatch(block)}
               onRefine={(text) => refine(block.id, text)}
               onRetry={() => send(block.text)}
               onRelax={send}
@@ -351,7 +342,6 @@ function Welcome({
 function RunBlockView({
   block,
   busy,
-  onNextBatch,
   onRefine,
   onRetry,
   onRelax,
@@ -360,7 +350,6 @@ function RunBlockView({
 }: {
   block: RunBlock
   busy: boolean
-  onNextBatch: () => void
   onRefine: (text: string) => void
   onRetry: () => void
   onRelax: (text: string) => void
@@ -369,10 +358,9 @@ function RunBlockView({
 }) {
   // 卡片整轮完成（done）后才展示：打分 / 生成理由阶段只保留进度卡，避免半成品结果
   const visible = block.phase === 'done' ? block.cards : []
-  const hasMore = block.phase === 'done' && block.hasMore
   const resultsRef = useRef<HTMLDivElement | null>(null)
 
-  // 结果（完成 / 换一批）出现时把结果区对齐到视口顶部：用户从第一张卡往下看，不再滚到底部
+  // 结果出现时把结果区对齐到视口顶部：用户从第一张卡开始看（横向滑动浏览全部）
   useEffect(() => {
     if (block.phase !== 'done' || block.cards.length === 0) return
     window.requestAnimationFrame(() => {
@@ -485,23 +473,19 @@ function RunBlockView({
           <div className="results-head">
             <h3>
               为你推荐
-              <span className="results-sub">共 {block.totalCount} 道候选</span>
+              <span className="results-sub">共 {visible.length} 道候选</span>
             </h3>
-            {hasMore && (
-              <button className="refresh-btn" type="button" onClick={onNextBatch}>
-                <Icon name="refresh" size={13} />
-                <span>换一批</span>
-              </button>
-            )}
           </div>
-          {visible.map((card) => (
-            <RecCard
-              key={card.dishId}
-              card={card}
-              reason={card.reason ?? block.reasons[card.dishId]}
-              onAdd={onAdd}
-            />
-          ))}
+          <div className="results-scroll hscroll">
+            {visible.map((card) => (
+              <RecCard
+                key={card.dishId}
+                card={card}
+                reason={card.reason ?? block.reasons[card.dishId]}
+                onAdd={onAdd}
+              />
+            ))}
+          </div>
         </div>
       )}
 

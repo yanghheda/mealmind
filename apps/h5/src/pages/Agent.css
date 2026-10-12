@@ -355,6 +355,21 @@
   /* 结果区对齐到视口顶部时，留出与 .chat 卡片间距一致的 12px 底色带 */
   scroll-margin-top: 12px;
 }
+/* 结果横向滚动：左右滑动浏览全部候选（卡片定宽露出下一张作为可滑提示） */
+.app--agent .results-scroll {
+  display: flex;
+  gap: 12px;
+  /* 负外边距让卡片能滑到屏幕边缘，内边距保证首尾卡片与正文对齐 */
+  margin: 0 -12px;
+  padding: 2px 12px 6px;
+  scroll-snap-type: x proximity;
+  scroll-padding-left: 12px;
+}
+.app--agent .results-scroll .rec-card {
+  flex: none;
+  width: 272px;
+  scroll-snap-align: start;
+}
 .app--agent .results-head {
   display: flex;
   align-items: center;
@@ -371,15 +386,7 @@
   font-weight: 400;
   color: var(--c-text-ter);
 }
-.app--agent .refresh-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11.5px;
-  color: var(--c-primary);
-  font-weight: 600;
-}
-/* W4 动效：卡片入场淡入；换一批时 key=dishId 保稳定，仅新卡片重挂载播放（不整列表重放） */
+/* W4 动效：卡片入场淡入（key=dishId 保稳定，仅新增卡片重挂载播放） */
 .app--agent .rec-card {
   animation: fadeUp 0.3s ease both;
 }
@@ -396,14 +403,24 @@
   flex: none;
   background: #f2f3f5;
 }
+.app--agent .rec-title {
+  flex: 1;
+  min-width: 0;
+}
 .app--agent .rec-title h4 {
   font-size: 15px;
   font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .app--agent .rec-title p {
   margin-top: 3px;
   font-size: 11px;
   color: var(--c-text-sub);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .app--agent .rec-score {
   margin-left: auto;
