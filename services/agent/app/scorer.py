@@ -1,7 +1,7 @@
 """RuleScorer：标签匹配 + 价格公式 + 口碑归一化的确定性打分（技术方案 §6.2）。
 
-它不是「假数据」：是 Jev 接入前整条链路的真实基线，也是评测里与 Jev 对比的对照组。
-统一接口 score(candidate, profile, context) 为将来 JevScorer 保留同一形状。
+它不是「假数据」：是决策模型接入前整条链路的真实基线，也是评测里与决策模型对比的对照组。
+统一接口 score(candidate, profile, context) 与 DecisionScorer 保持同一形状。
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from .config import settings
 from .degrade import DegradationController, degrade_controller
-from .jev import resolve_primary as resolve_jev
+from .decision import resolve_primary as resolve_decision
 from .models import Candidate, CandidateScore, DimScore, Profile
 from .runs import RunUsage
 
@@ -38,7 +38,7 @@ DIM_NAMES = ("taste", "budget", "timeliness", "reputation", "scene")
 class ScoringContext:
     """一次打分批次内的上下文（口碑维度的月售归一化需要批内最大值）。
 
-    M4 W5：去 frozen 并携带可变 usage，JevScorer 借它累加调用次数。
+    M4 W5：去 frozen 并携带可变 usage，DecisionScorer 借它累加调用次数。
     """
 
     max_dish_sales: int
@@ -164,7 +164,7 @@ scorer = RuleScorer()
 class ScorerRouter:
     """通道选择与逐菜降级（技术方案 §6.2）。
 
-    主通道（Jev）可用时逐菜打分，单菜失败即回退规则分并计入本轮失败率，
+    主通道（决策模型）可用时逐菜打分，单菜失败即回退规则分并计入本轮失败率，
     失败率驱动 DegradationController 在 NORMAL / PARTIAL / FULL 三档间迁移。
     RULE 模式或主通道未接入时始终走规则分，控制器停用、档位停在 NORMAL。
     """
@@ -213,9 +213,9 @@ class ScorerRouter:
 
 
 def resolve_primary():
-    """主通道 Scorer：配置了 Vercel AI Gateway key 时启用 Jev，否则整条链路走规则分。"""
+    """主通道 Scorer：配置了百炼 key 时启用 decision-model-preview，否则整条链路走规则分。"""
 
-    return resolve_jev()
+    return resolve_decision()
 
 
 router = ScorerRouter(resolve_primary(), scorer, degrade_controller)

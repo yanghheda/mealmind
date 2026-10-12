@@ -250,7 +250,7 @@ async def _usage(state: DecisionState) -> DecisionState:
         {
             "inputTokens": int(round(usage.input_tokens)),
             "outputTokens": int(round(usage.output_tokens)),
-            "jevCalls": usage.jev_calls,
+            "decisionCalls": usage.decision_calls,
             "estimated": usage.estimated,
             "understandMs": int(round(usage.understand_ms)),
             "scoreMs": int(round(usage.score_ms)),
@@ -258,13 +258,12 @@ async def _usage(state: DecisionState) -> DecisionState:
             "filterWaitMs": int(round(usage.filter_wait_ms)),
         },
     )
-    # Jev 不逐次采 token：按 PRD §5.8 实测常量（1018 入 / 90 出）折算进日志，便于与人读口径对齐
+    # 决策模型计次不逐次采 token（decision-model-preview 限时免费，成本恒为 0；恢复计费后按官方单价调整）
     logger.info(
-        "usage runId=%s qwen_in=%d qwen_out=%d estimated=%s jev_calls=%d jev_tokens≈%d/%d "
+        "usage runId=%s qwen_in=%d qwen_out=%d estimated=%s decision_calls=%d "
         "understand=%dms score=%dms phrase=%dms filterWait=%dms",
         state["run_id"], usage.input_tokens, usage.output_tokens, usage.estimated,
-        usage.jev_calls, usage.jev_calls * settings.jev_tokens_in,
-        usage.jev_calls * settings.jev_tokens_out,
+        usage.decision_calls,
         round(usage.understand_ms), round(usage.score_ms),
         round(usage.phrase_ms), round(usage.filter_wait_ms),
     )

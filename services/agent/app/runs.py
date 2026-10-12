@@ -18,22 +18,22 @@ from dataclasses import dataclass, field
 class RunUsage:
     """一次决策的用量与阶段耗时（M4 W5 成本计量）：各节点边执行边累加，_usage 节点统一上报。
 
-    打分按批并发（asyncio.to_thread），jev_calls 用锁累加以防丢更新；其余字段只在图节点线程写。
+    打分按批并发（asyncio.to_thread），decision_calls 用锁累加以防丢更新；其余字段只在图节点线程写。
     """
 
     input_tokens: int = 0
     output_tokens: int = 0
     estimated: bool = False
-    jev_calls: int = 0
+    decision_calls: int = 0
     understand_ms: float = 0.0
     score_ms: float = 0.0
     phrase_ms: float = 0.0
     filter_wait_ms: float = 0.0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
-    def count_jev_call(self) -> None:
+    def count_decision_call(self) -> None:
         with self._lock:
-            self.jev_calls += 1
+            self.decision_calls += 1
 
 
 @dataclass
@@ -52,7 +52,7 @@ class RunContext:
     answers_skipped: bool = False
     # 最近一次活动时间：sweep 以它判断僵尸 run（澄清等待不计）
     last_activity: float = field(default_factory=time.monotonic)
-    # 成本计量（M4 W5）：token / Jev 调用数 / 各阶段耗时
+    # 成本计量（M4 W5）：token / 决策模型调用数 / 各阶段耗时
     usage: RunUsage = field(default_factory=RunUsage)
 
     def emit(self, event: str, data: dict) -> None:

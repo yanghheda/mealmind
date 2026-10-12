@@ -1,14 +1,16 @@
-"""JevScorer：经 TeamoRouter 调用 Jev 决策模型（技术方案 §6.2）。
+"""DecisionScorer：经阿里云百炼调用 decision-model-preview 决策模型（技术方案 §6.2）。
 
-Jev 不是对话模型：一次请求内对同一份 state 并行回答多个 typed question，
+2026-10-12 起平替原 Jev 通道：协议同为 TypeSafe System One（`POST .../systemone`），
+请求载荷与响应语义一致（score 概率加权下标、noul 概率、confidence），只换接入方。
+决策模型不是对话模型：一次请求内对同一份 state 并行回答多个 typed question，
 返回带概率的取值而非自由文本。本项目一次请求提交 5 个 `score` 维度问题
 与 1 个 `noul` 忌口护栏问题。
 
-走的是 TypeSafe 原生格式（`POST /v1/systemone`），不是 OpenAI 兼容格式：
+走的是 TypeSafe 原生格式（`POST /compatible-mode/v1/systemone`），不是 OpenAI 兼容格式：
 是非判断用 `noul` 原语（返回 0–1 数值），而非网关侧的 `boolean`。
-`score` 返回 criteria 数组上的 0 基插值下标（如 4 档返回 2.97），
+`score` 返回 criteria 数组上的概率加权期望下标（如 4 档返回 2.43），
 因此归一化到 0–10 只需按档位数线性映射：`score / (档位数 - 1) * 10`。
-置信度优先取模型自报的 `confidence`（已校准），缺失时才退回概率峰值。
+置信度优先取模型自报的 `confidence`，缺失时才退回概率峰值。
 """
 
 from __future__ import annotations
@@ -21,11 +23,11 @@ import httpx
 from .config import settings
 from .models import Candidate, CandidateScore, DimScore, Profile
 
-logger = logging.getLogger("mealmind.agent.jev")
+logger = logging.getLogger("mealmind.agent.decision")
 
 DIM_NAMES = ("taste", "budget", "timeliness", "reputation", "scene")
 
-# 五维档位（PRD 5.4 / §11「Rubric 档位定稿」）：描述从低到高，Jev 返回其上的插值下标。
+# 五维档位（PRD 5.4 / §11「Rubric 档位定稿」）：描述从低到高，模型返回其上的概率加权下标。
 # 措辞需用 Golden 集验证区分度后再定稿并升 rubric_version。
 RUBRIC: dict[str, dict[str, Any]] = {
     "taste": {
@@ -78,30 +80,27 @@ RUBRIC: dict[str, dict[str, Any]] = {
 GUARD_QUESTION = "conflict"
 
 
-class JevError(RuntimeError):
-    """Jev 调用或响应异常，交由降级状态机处理。"""
+class DecisionModelError(RuntimeError):
+    """决策模型调用或响应异常，交由降级状态机处理。"""
 
 
-class JevClient:
-    """TeamoRouter 的 TypeSafe 兼容端点客户端：POST {base}/systemone。"""
+class DecisionModelClient:
+    """百炼 System One 兼容端点客户端：POST {base}/systemone。"""
 
     def __init__(self, *, api_key: str, base_url: str, model: str,
-                 timeout_s: float = 3.0, retries: int = 1, proxy_url: str = "") -> None:
+                 timeout_s: float = 3.0, retries: int = 1) -> None:
         self._api_key = api_key
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._timeout_s = timeout_s
         self._retries = retries
-        # 本地开发需经 SOCKS 代理才能到达该域名（直连在 TLS 握手被重置，实测）；
-        # 生产环境通常可直连，故默认留空
-        self._proxy_url = proxy_url or None
 
     @property
     def configured(self) -> bool:
         return bool(self._api_key)
 
     def evaluate(self, state: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any]:
-        """一次决策请求；超时与重试按 §6.2（实测中位 1.2s、上限 2.1s，超时取 3s）。
+        """一次决策请求；超时与重试按 §6.2（实测服务端 65–75ms，超时取 3s）。
 
         注意：TypeSafe 格式不使用 messages / stream / temperature / max_tokens。
         """
@@ -114,32 +113,33 @@ class JevClient:
         last_error: Exception | None = None
         for attempt in range(self._retries + 1):
             try:
-                with httpx.Client(timeout=self._timeout_s, proxy=self._proxy_url) as client:
+                with httpx.Client(timeout=self._timeout_s) as client:
                     response = client.post(
                         f"{self._base_url}/systemone",
                         headers={"Authorization": f"Bearer {self._api_key}"},
                         json=payload,
                     )
                 if response.status_code != 200:
-                    raise JevError(f"jev returned {response.status_code}: {response.text[:200]}")
+                    raise DecisionModelError(
+                        f"decision model returned {response.status_code}: {response.text[:200]}")
                 body = response.json()
                 answers = body.get("answers")
                 if not isinstance(answers, dict):
-                    raise JevError("jev response missing answers")
+                    raise DecisionModelError("decision model response missing answers")
                 return body
             except Exception as exc:
                 last_error = exc
-                logger.warning("jev evaluate failed (attempt %d/%d): %s",
+                logger.warning("decision evaluate failed (attempt %d/%d): %s",
                                attempt + 1, self._retries + 1, exc)
-        raise JevError(str(last_error))
+        raise DecisionModelError(str(last_error))
 
 
-class JevScorer:
-    """五维 Jev 打分：一次请求并行回答 5 个 score 与 1 个忌口护栏 boolean。"""
+class DecisionScorer:
+    """五维决策模型打分：一次请求并行回答 5 个 score 与 1 个忌口护栏 noul。"""
 
-    mode = "JEV"
+    mode = "DECISION"
 
-    def __init__(self, client: JevClient) -> None:
+    def __init__(self, client: DecisionModelClient) -> None:
         self._client = client
 
     def score(self, candidate: Candidate, profile: Profile, context: Any) -> CandidateScore:
@@ -160,8 +160,8 @@ class JevScorer:
             }
 
         answers = self._client.evaluate(_state(candidate, profile), questions).get("answers", {})
-        # 成本计量（M4 W5）：一次成功的 Jev 调用（token 按 PRD §5.8 实测常量折算，不逐次采集）
-        context.usage.count_jev_call()
+        # 成本计量（M4 W5）：一次成功的决策模型调用（计次不逐次采 token）
+        context.usage.count_decision_call()
         dims = [self._to_dim(dim, answers.get(dim)) for dim in DIM_NAMES]
         guard = 0.0
         if avoid:
@@ -179,11 +179,11 @@ class JevScorer:
         levels = len(RUBRIC[dim]["criteria"])
         raw = _as_float(answer.get("score") if isinstance(answer, dict) else None, None)
         if raw is None:
-            raise JevError(f"answer for {dim} missing score")
-        # 0 基插值下标 → 0–10；档位数 2 时退化为二分
+            raise DecisionModelError(f"answer for {dim} missing score")
+        # 概率加权下标 → 0–10；档位数 2 时退化为二分
         value = 0.0 if levels < 2 else raw / (levels - 1) * 10.0
         value = min(10.0, max(0.0, value))
-        # 优先用模型自报的校准置信度；缺失时退回概率峰值
+        # 优先用模型自报置信度；缺失时退回概率峰值
         reported = _as_float(answer.get("confidence"), None) if isinstance(answer, dict) else None
         if reported is not None:
             confidence = round(reported, 3)
@@ -193,7 +193,7 @@ class JevScorer:
 
 
 def _state(candidate: Candidate, profile: Profile) -> dict[str, Any]:
-    """结构化 state：需求 + 菜品事实，Jev 不需要再查任何存储。"""
+    """结构化 state：需求 + 菜品事实，决策模型不需要再查任何存储。"""
 
     wants: dict[str, Any] = {}
     if profile.taste_tags:
@@ -235,16 +235,15 @@ def _peak(probabilities: Any) -> float:
     return round(max(values), 3) if values else 0.5
 
 
-_client = JevClient(
-    api_key=settings.jev_api_key,
-    base_url=settings.jev_base_url,
-    model=settings.jev_model,
-    timeout_s=settings.jev_timeout_s,
-    proxy_url=settings.jev_proxy_url,
+_client = DecisionModelClient(
+    api_key=settings.decision_api_key,
+    base_url=settings.decision_base_url,
+    model=settings.decision_model,
+    timeout_s=settings.decision_timeout_s,
 )
 
 
 def resolve_primary():
-    """配置了 TeamoRouter key 才启用 Jev 通道，否则整条链路走规则分。"""
+    """配置了百炼决策模型 key 才启用主通道，否则整条链路走规则分。"""
 
-    return JevScorer(_client) if _client.configured else None
+    return DecisionScorer(_client) if _client.configured else None

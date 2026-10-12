@@ -161,7 +161,7 @@ async def score(request: ScoreRequest) -> ScoreResponse:
     max_sales = max((c.dishMonthlySales for c in candidates), default=0)
     scoring_context = ScoringContext(max_dish_sales=max_sales)
 
-    # 与生产图 _score 节点同一口径：按批并发打分（Jev 单次约 1.3s，串行 20 道要 26s）
+    # 与生产图 _score 节点同一口径：按批并发打分（决策模型单次含网络往返约 0.3s，串行 20 道会明显拖慢）
     scores: list[tuple[Candidate, CandidateScore]] = []
     for start in range(0, len(candidates), settings.batch_size):
         batch = candidates[start : start + settings.batch_size]
