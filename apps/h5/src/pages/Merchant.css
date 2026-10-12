@@ -142,7 +142,7 @@
 /* ---- 底部购物车条（页面作用域：Cart.css 里也有 .cartbar，不限定会互相覆盖） ---- */
 .app--merchant .cartbar {
   position: fixed; z-index: 60; left: 50%; bottom: 0; transform: translateX(-50%);
-  width: 100%; max-width: 414px;
+  width: 100%; max-width: var(--app-max);
   height: calc(60px + env(safe-area-inset-bottom));
   padding: 0 12px; padding-bottom: env(safe-area-inset-bottom);
   display: flex; align-items: center; gap: 12px;

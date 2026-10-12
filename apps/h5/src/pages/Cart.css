@@ -45,7 +45,7 @@
   position: fixed; z-index: 60;
   left: 50%; bottom: calc(56px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
-  width: 100%; max-width: 414px;
+  width: 100%; max-width: var(--app-max);
   display: flex; align-items: center; gap: 12px;
   padding: 10px 14px;
   background: rgba(255, 255, 255, .98);

@@ -36,6 +36,9 @@
   --shadow-float: 0 6px 20px rgba(255, 80, 0, .28);
 
   --statusbar-bg: #FFFFFF;
+
+  /* 应用外框宽度上限：移动端不设限（全宽铺满），桌面端 414px 居中（断点见 §24） */
+  --app-max: none;
 }
 
 /* ---------- 2. Base ---------- */
@@ -61,18 +64,15 @@ h1, h2, h3, h4, p { margin: 0; }
 .hscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .hscroll::-webkit-scrollbar { display: none; }
 
-/* 应用容器：移动端全宽，桌面居中呈现 */
+/* 应用容器：移动端全宽铺满，桌面端收窄为手机框居中（响应式规则统一见 §24） */
 .app {
   position: relative;
   width: 100%;
-  max-width: 414px;
+  max-width: var(--app-max);
   min-height: 100vh;
   margin: 0 auto;
   background: var(--c-bg);
   overflow-x: hidden;
-}
-@media (min-width: 430px) {
-  .app { box-shadow: 0 0 0 1px rgba(0, 0, 0, .04), 0 16px 48px rgba(17, 17, 26, .12); }
 }
 
 /* ---------- 3. Status bar（仿真，随 Shell 复制） ---------- */
@@ -97,7 +97,7 @@ h1, h2, h3, h4, p { margin: 0; }
 .tabbar {
   position: fixed; z-index: 70;
   left: 50%; bottom: 0; transform: translateX(-50%);
-  width: 100%; max-width: 414px;
+  width: 100%; max-width: var(--app-max);
   height: calc(56px + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   display: flex;
@@ -339,7 +339,7 @@ h1, h2, h3, h4, p { margin: 0; }
 .sheet {
   position: fixed; z-index: 110;
   left: 50%; bottom: 0; transform: translateX(-50%) translateY(100%);
-  width: 100%; max-width: 414px; max-height: 86vh;
+  width: 100%; max-width: var(--app-max); max-height: 86vh;
   display: flex; flex-direction: column;
   background: #fff; border-radius: 16px 16px 0 0;
   padding-bottom: env(safe-area-inset-bottom);
@@ -478,3 +478,16 @@ h1, h2, h3, h4, p { margin: 0; }
 .page-head .title { font-size: 17px; font-weight: 700; }
 .page-head .head-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; color: #333; }
 .page-head .head-actions svg { width: 20px; height: 20px; }
+
+/* ---------- 24. 响应式：移动端全宽铺满 / 桌面端手机外框 ----------
+   移动端（<600px）：内容铺满屏幕无边距，隐藏仿真状态栏（真机由系统状态栏接管）；
+   桌面端（≥600px）：收窄为 414px 手机框居中，保留仿真状态栏与投影 */
+@media (max-width: 599.98px) {
+  .statusbar { display: none; }
+  /* 仿真状态栏隐藏后，封面补足首屏高度 */
+  .cover { min-height: 100vh; }
+}
+@media (min-width: 600px) {
+  :root { --app-max: 414px; }
+  .app { box-shadow: 0 0 0 1px rgba(0, 0, 0, .04), 0 16px 48px rgba(17, 17, 26, .12); }
+}
