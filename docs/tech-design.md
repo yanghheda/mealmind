@@ -861,7 +861,7 @@ ssh <user>@<server> "cd /opt/mealmind && \
 
 `--no-deps` 保证只动目标容器、不重启其它服务，更不触碰基础设施；`--wait` 等健康检查通过，失败即流水线失败。回滚不引入额外机制：以旧版本的 commit SHA 作为 `MEALMIND_IMAGE_TAG` 重新 `up -d` 即可（镜像按 SHA 保留）[Expert judgment]。
 
-仓库需配置（Environment `production`）：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_PRIVATE_KEY`、`DEPLOY_KNOWN_HOSTS`（预先核验的 host key，禁止运行时 `ssh-keyscan`）、variable `DEPLOY_PATH=/opt/mealmind`；GHCR 登录用 Actions 内置 `GITHUB_TOKEN`（仓库需允许 Actions 写 Packages）。服务器上的 `deploy` 用户、docker 组与 rsync 在基础设施阶段已就绪，无需重复配置。
+仓库需配置（仓库级 Secrets / Variables：Settings → Secrets and variables → Actions）：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_PRIVATE_KEY`、`DEPLOY_KNOWN_HOSTS`（预先核验的 host key，禁止运行时 `ssh-keyscan`）、variable `DEPLOY_PATH=/opt/mealmind`；GHCR 登录用 Actions 内置 `GITHUB_TOKEN`（仓库需允许 Actions 写 Packages）。服务器上的 `deploy` 用户、docker 组与 rsync 在基础设施阶段已就绪，无需重复配置。
 
 服务器到 `ghcr.io` 的连通性已实测通过（2026-10-03：HTTPS 可达，docker 鉴权拉取 manifest 正常），不需要备用镜像仓库方案。
 

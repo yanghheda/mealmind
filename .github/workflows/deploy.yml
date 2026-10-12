@@ -1,9 +1,9 @@
 # MealMind 发布流水线（技术方案 §8.3）：CI 构建镜像 → 推送 GHCR → 服务器 SSH 拉取重启。
 # 服务器上不落地源码、不构建，只 pull + up；按变更路径只重建受影响的服务。
 #
-# 仓库需配置（Environment `production`）：
-#   secrets： DEPLOY_HOST / DEPLOY_USER / DEPLOY_SSH_PRIVATE_KEY / DEPLOY_KNOWN_HOSTS
-#   variable：DEPLOY_PATH=/opt/mealmind
+# 仓库需配置（仓库级，Settings → Secrets and variables → Actions）：
+#   Secrets：   DEPLOY_HOST / DEPLOY_USER / DEPLOY_SSH_PRIVATE_KEY / DEPLOY_KNOWN_HOSTS
+#   Variables： DEPLOY_PATH=/opt/mealmind
 # 服务器侧一次性准备（目录、deploy/.env、GHCR 拉取权限）见 docs/tech-design.md §8.2。
 name: deploy
 
@@ -222,7 +222,6 @@ jobs:
       && (needs.prepare.outputs.web == 'true' || needs.prepare.outputs.api == 'true'
       || needs.prepare.outputs.agent == 'true' || needs.prepare.outputs.sync_only == 'true')
     runs-on: ubuntu-latest
-    environment: production
     steps:
       - uses: actions/checkout@v4
       - name: 准备 SSH 环境
