@@ -68,15 +68,13 @@ services:
       INTERNAL_TOKEN: ${MEALMIND_INTERNAL_TOKEN}
       # 与 biz 保持同一时钟（日志对时；agent 不写数据库）
       TZ: Asia/Shanghai
-      # 打分通道：AUTO 优先 Jev、失败自动降级规则；RULE 强制规则；JEV 强制 Jev
-      # 默认 RULE：Jev 模型已从 TeamoRouter 下线（2026-10-12 确认），暂时固定走规则分（M2 基线）
-      SCORER_MODE: ${SCORER_MODE:-RULE}
-      # Jev 经 TeamoRouter 调用（技术方案 §2 选型）
-      JEV_API_KEY: ${JEV_API_KEY}
-      JEV_BASE_URL: ${JEV_BASE_URL:-https://api.teamorouter.com/v1}
-      JEV_MODEL: ${JEV_MODEL:-jev}
-      # 出网代理：本地直连不通时用（生产可留空）
-      JEV_PROXY_URL: ${JEV_PROXY_URL:-}
+      # 打分通道：AUTO 优先决策模型、失败自动降级规则；RULE 强制规则；DECISION 强制决策模型
+      SCORER_MODE: ${SCORER_MODE:-AUTO}
+      # 决策模型（System One 协议）：阿里云百炼 decision-model-preview（2026-10-12 起平替 Jev）
+      # DECISION_BASE_URL 留空则用代码默认（试用域名）；生产建议在 .env 填业务空间专属域名 API Host
+      DECISION_API_KEY: ${DECISION_API_KEY}
+      DECISION_BASE_URL: ${DECISION_BASE_URL:-}
+      DECISION_MODEL: ${DECISION_MODEL:-decision-model-preview}
       # 生成式模型（理解与表达）：阿里云百炼 qwen3.8
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
       QWEN_BASE_URL: ${QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
@@ -102,5 +100,5 @@ services:
 networks:
   infra-net: { external: true }
   internal: { internal: true }
-  # 普通 bridge 网络：只提供公网出网能力（Jev / 生成式大模型调用），不承载任何存储
+  # 普通 bridge 网络：只提供公网出网能力（决策模型 / 生成式大模型调用），不承载任何存储
   egress: {}
